@@ -4,11 +4,13 @@
   "private": true,
   "description": "Juego online de preguntas con rebote, perfiles y ligas privadas.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
-    "check": "node --check src/server.js && node --check src/quiz.js && node --check public/app.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "check": "node --check server.js && node --check quiz.js && node --check questions.js && node --check app.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

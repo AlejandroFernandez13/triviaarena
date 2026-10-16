@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10131d">
+  <meta name="description" content="Trivia Arena: partidas de preguntas con rebote, perfiles y ligas privadas.">
+  <title>Trivia Arena — El conocimiento compite</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Trivia Arena, inicio" data-action="home">
+      <span class="brand-mark">T<span>+</span></span>
+      <span>TRIVIA<span class="brand-light">ARENA</span></span>
+    </a>
+    <div id="top-status" class="top-status"></div>
+  </header>
+  <main id="app" class="app-shell">
+    <div class="loading-shell"><div class="loader"></div><p>Preparando la arena…</p></div>
+  </main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

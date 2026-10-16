@@ -1,95 +1,63 @@
-# Trivia Arena — MVP online
+# Trivia Arena — versión plana para GitHub
 
-Juego web en español de preguntas de conocimiento con respuestas escritas, rebotes, perfiles guardados y ligas privadas. Stack: Node.js, Express, Socket.IO y PostgreSQL. Está preparado para subir el repositorio a GitHub y desplegarlo en Render.
+Proyecto web de preguntas y respuestas en español, con perfiles, partidas rápidas online, preguntas con rebote, modo liga y árbitro de IA opcional. Esta variante tiene **todos los archivos en una sola carpeta**, sin subcarpetas, para poder subirlos directamente desde GitHub en el navegador.
 
-## Incluido en esta primera versión
+## Archivos que debes subir
 
-- **Perfiles persistentes:** registro e inicio de sesión con contraseña cifrada; se guardan usuario, estadísticas y últimas partidas.
-- **Partida rápida online:** crear sala, código para compartir, unirse mediante código y jugadores sin un límite artificial en la lógica del juego.
-- **Reglas configurables:** llegar a una puntuación o jugar un número fijo de preguntas; tema elegido, aleatorio o personalizado.
-- **Preguntas sin opciones:** el jugador escribe la respuesta. La pregunta rebota al siguiente jugador si falla; el punto se lo lleva quien finalmente acierte.
-- **Orden de juego fijo:** se sortea al comenzar y se conserva durante la partida.
-- **Desempate:** si hay empate al terminar el número de preguntas, solo los jugadores empatados participan; gana quien consiga una ventaja de dos puntos de desempate.
-- **Modo liga 1 contra 1:** crear o unirse a una liga, tabla de clasificación, enfrentamientos mediante código y 3 puntos por victoria.
-- **Registro de partidas:** el servidor guarda los resultados finalizados en PostgreSQL.
-- **IA opcional:** con `OPENAI_API_KEY`, crea preguntas nuevas y valora respuestas por significado. Sin clave, hay un banco de respaldo y comparación local para probar el juego.
+Sube **los 11 archivos** de esta carpeta directamente a la raíz de tu repositorio: `README.md`, `package.json`, `.env.example`, `.gitignore`, `render.yaml`, `server.js`, `quiz.js`, `questions.js`, `index.html`, `styles.css` y `app.js`.
 
-## Requisitos
+No subas el ZIP como único archivo: descárgalo, descomprímelo en tu ordenador y sube los archivos que contiene. No hace falta crear carpetas en GitHub. Respeta los nombres de archivo, incluidos los puntos iniciales de `.env.example` y `.gitignore`.
 
-- Node.js 20 o posterior.
-- PostgreSQL.
-- Opcional: una clave de API de OpenAI. El uso de la API puede tener un coste aparte; una suscripción de ChatGPT no incluye automáticamente crédito de API.
+## Qué incluye
 
-## Desplegar en Render + GitHub
+- Registro e inicio de sesión; contraseñas cifradas y perfil persistente.
+- Partidas rápidas online, código para unirse, tema, puntuación objetivo o número de preguntas configurable.
+- Respuestas escritas y rebote de la misma pregunta si alguien falla.
+- Desempate entre los jugadores empatados.
+- Ligas privadas 1 contra 1 y tabla de clasificación persistente.
+- Estadísticas e historial guardados en PostgreSQL.
+- Preguntas nuevas y evaluación semántica mediante OpenAI si configuras `OPENAI_API_KEY`; banco local para probar sin esa clave.
 
-1. Crea un repositorio nuevo en GitHub y sube **todo el contenido de esta carpeta** a la raíz del repositorio. No subas archivos `.env` ni claves secretas.
-2. En Render, elige **New → Blueprint** y selecciona el repositorio. Render leerá `render.yaml`, creará el servicio Node y una base PostgreSQL.
-3. Espera a que termine el primer deploy y abre la URL que Render asigne al servicio.
-4. Para activar el árbitro IA, abre **Environment** en el servicio web y añade `OPENAI_API_KEY` con tu clave. Opcionalmente, configura `OPENAI_MODEL`; por defecto usa `gpt-5.5`. Guarda y deja que Render vuelva a desplegar.
-5. Para verificar el servidor, abre `/health` en el dominio de la app: debe responder `{"ok":true}`.
+## Desplegar en Render
 
-### Importante sobre la persistencia y el plan gratuito
-
-El blueprint está preparado para arrancar en el plan gratuito de Render para facilitar las pruebas. **Las bases PostgreSQL gratuitas de Render caducan a los 30 días**. Para que perfiles, estadísticas y ligas no desaparezcan a largo plazo, tendrás que subir la base de datos a un plan persistente de pago antes de que caduque, o configurar otro proveedor PostgreSQL persistente y apuntar `DATABASE_URL` a esa conexión. El servicio web gratuito también puede quedarse dormido tras un periodo sin tráfico. Consulta los límites actuales antes de usar datos importantes: <https://render.com/docs/free>.
-
-La clave de IA es opcional para probar la interfaz y el flujo de partidas. Si quieres preguntas nuevas de cualquier tema y evaluación semántica, debes añadirla como variable de entorno privada en Render; no la pongas en el código ni en GitHub.
-
-## Ejecutar en local
-
-1. Instala Node.js 20+ y PostgreSQL.
-2. Crea una base de datos llamada `trivia_arena`.
-3. Copia `.env.example` a `.env` y edita `DATABASE_URL` y `SESSION_SECRET`.
-4. Instala dependencias y arranca:
-
-   ```bash
-   npm install
-   npm run dev
-   ```
-
-5. Abre <http://localhost:3000>.
-
-El esquema se crea automáticamente en el arranque. Para usar generación/corrección por IA en local, añade `OPENAI_API_KEY` en `.env`.
+1. Sube todos los archivos de esta carpeta a la raíz del repositorio de GitHub.
+2. En Render, elige **New → Blueprint** y selecciona el repositorio. Render utilizará `render.yaml` para configurar el servicio web Node y PostgreSQL.
+3. Espera a que termine el despliegue y abre la URL que te facilite Render.
+4. Opcionalmente, añade `OPENAI_API_KEY` en las variables de entorno privadas del servicio de Render para activar generación y corrección con IA. No publiques esa clave en GitHub.
+5. Comprueba que `https://TU-DOMINIO/health` devuelve `{"ok":true}`.
 
 ## Variables de entorno
 
-| Variable | Obligatoria | Para qué sirve |
-|---|---|---|
-| `DATABASE_URL` | Sí | Conexión a PostgreSQL |
-| `SESSION_SECRET` | Recomendado | Firma de sesiones; Render la genera en el blueprint |
-| `NODE_ENV` | En Render | Debe ser `production` para cookies seguras |
-| `PORT` | No | Puerto HTTP; Render lo define automáticamente |
-| `OPENAI_API_KEY` | No | Activa generación y valoración por IA |
-| `OPENAI_MODEL` | No | Modelo de IA, por defecto `gpt-5.5` |
+- `DATABASE_URL`: conexión a PostgreSQL; Render la configura mediante el Blueprint.
+- `SESSION_SECRET`: secreto de sesión; Render lo genera en el Blueprint.
+- `NODE_ENV`: Render lo establece como `production`.
+- `PORT`: Render lo establece automáticamente.
+- `OPENAI_API_KEY`: opcional; habilita generación/corrección con IA y puede tener coste de API separado de ChatGPT.
+- `OPENAI_MODEL`: opcional; el modelo utilizado por la API.
 
-## Cómo funciona el árbitro
+Para desarrollo local, copia `.env.example` como `.env`, rellena una conexión PostgreSQL y ejecuta `npm install` y `npm start` con Node.js 20 o posterior.
 
-- La clave de respuesta y los alias aceptados solo se guardan en el servidor; el navegador recibe el enunciado, no la solución.
-- Mientras la pregunta siga rebotando, no se revela la solución a los demás jugadores.
-- Cuando el árbitro IA está habilitado, se le pide aceptar sinónimos, nombres alternativos y respuestas semánticamente equivalentes. Si la API falla, el juego intenta usar la comparación local y registra el error en los logs del servidor.
-- Sin IA, el juego es una versión de demostración: funciona con un banco de preguntas finito y no puede cubrir de manera fiable cualquier tema personalizado.
+## Disposición de archivos
 
-## Límites conocidos de este MVP
-
-- Las salas activas viven en memoria del proceso. Si Render reinicia o despliega la app durante una partida, esa sala se pierde; las partidas ya finalizadas siguen registradas en PostgreSQL. Una siguiente fase puede persistir y recuperar el estado completo de las salas.
-- No hay chat, rankings globales ni sistema de moderación entre usuarios todavía.
-- La IA puede equivocarse. Para partidas importantes, revisa los logs y ajusta las instrucciones de evaluación.
-- Este proyecto todavía no ha sido desplegado en una cuenta real de Render ni conectado a una clave de IA del propietario; hay que completar esos pasos en sus respectivos paneles.
-
-## Archivos principales
+Todos están al mismo nivel; no hay carpetas dentro del proyecto:
 
 ```text
-trivia-arena/
-├── public/
-│   ├── index.html
-│   ├── styles.css
-│   └── app.js
-├── src/
-│   ├── server.js
-│   ├── quiz.js
-│   └── questions.js
-├── .env.example
-├── .gitignore
-├── package.json
-├── render.yaml
-└── README.md
+README.md
+package.json
+.env.example
+.gitignore
+render.yaml
+server.js
+quiz.js
+questions.js
+index.html
+styles.css
+app.js
 ```
+
+## Limitaciones conocidas
+
+- Las salas de partida activas se guardan en la memoria del servidor y se pierden si Render reinicia o despliega la aplicación. Las partidas terminadas sí quedan registradas en PostgreSQL.
+- Sin `OPENAI_API_KEY`, se utiliza un banco de preguntas limitado y una comparación local de respuestas; no puede cubrir cualquier tema personalizado.
+- Antes de confiar en los datos a largo plazo, revisa las condiciones y la caducidad del plan de PostgreSQL que elijas en Render.
+- Esta versión todavía debe probarse en una cuenta real de Render y con la base de datos conectada.
