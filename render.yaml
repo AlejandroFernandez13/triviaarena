@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: trivia-arena
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: trivia-arena-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+
+databases:
+  - name: trivia-arena-db
+    databaseName: trivia_arena
+    user: trivia_arena_user
+    plan: free
