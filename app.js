@@ -204,7 +204,8 @@ function loadingRoomTemplate(title = 'Preparando tu sala…') {
 }
 function roomPlayersList(room) {
   if (!room.players.length) return '<div class="empty-state">Aún no hay jugadores en la sala.</div>';
-  return `<div class="player-list">${room.players.map((player, index) => `<div class="player-row"><div class="player-left"><div class="player-avatar">${esc(player.username.slice(0, 1).toUpperCase())}</div><div><div class="player-name">${esc(player.username)} ${player.id === room.hostId ? '<span class="tag lime" style="margin-left:5px">Host</span>' : ''}</div><div class="player-meta">${player.id === state.me?.id ? 'Tu perfil' : `Jugador ${index + 1}`}</div></div></div><span class="status-dot" title="Conectado a la sala"></span></div>`).join('')}</div>`;
+  const isHost = state.me?.id === room.hostId;
+  return `<div class="player-list">${room.players.map((player, index) => `<div class="player-row"><div class="player-left"><div class="player-avatar">${esc(player.username.slice(0, 1).toUpperCase())}</div><div><div class="player-name">${esc(player.username)} ${player.id === room.hostId ? '<span class="tag lime" style="margin-left:5px">Host</span>' : ''}</div><div class="player-meta">${player.id === state.me?.id ? 'Tu perfil' : `Jugador ${index + 1}`}</div></div></div><div style="display:flex;align-items:center;gap:10px"><span class="status-dot" title="Conectado a la sala"></span>${isHost && player.id !== state.me?.id ? `<button class="btn btn-ghost btn-small" data-action="kick-room-player" data-user-id="${esc(player.id)}" data-username="${esc(player.username)}">Expulsar</button>` : ''}</div></div>`).join('')}</div>`;
 }
 function settingsTemplate(room) {
   return `<div class="setting-line"><span>Modalidad</span><strong>${room.mode === 'league' ? 'Duelo de liga 1 vs 1' : 'Partida rápida'}</strong></div>
@@ -219,7 +220,7 @@ function lobbyTemplate() {
   const isHost = state.me?.id === room.hostId;
   const canStart = room.players.length >= 2 && (room.mode !== 'league' || room.players.length === 2);
   return `
-    <button class="back-link" data-action="leave-room">← Salir de la sala</button>
+    <button class="back-link" data-action="leave-room">← Salir al menú</button>
     <div class="room-top"><div><div class="eyebrow">Sala de espera / ${room.mode === 'league' ? 'Duelo de liga' : 'Partida rápida'}</div><h1>${room.mode === 'league' ? esc(room.leagueName || 'Duelo privado') : 'Reúne a tu equipo'}<span style="color:var(--lime)">.</span></h1><p class="muted small" style="margin:8px 0 0">${isHost ? 'Comparte el código y empieza cuando todos estén dentro.' : 'Has entrado. Espera a que el anfitrión inicie la partida.'}</p></div><div class="room-code">${esc(room.code)}</div></div>
     <div class="lobby-grid">
       <section class="panel"><div class="panel-head"><div><div class="eyebrow">Participantes</div><h2>Jugadores conectados</h2></div><span class="tag lime">${room.players.length} ${room.players.length === 1 ? 'jugador' : 'jugadores'}</span></div>${roomPlayersList(room)}
@@ -237,12 +238,15 @@ function gameFeedback(room) {
   return `<div class="feedback incorrect"><div class="feedback-title">✕ ${esc(result.username)} no ha acertado</div><div>${esc(result.feedback || 'La pregunta rebota al siguiente jugador.')}</div><div class="muted small" style="margin-top:7px">Ahora responde: <strong>${esc(result.nextUsername || '')}</strong>. La solución seguirá oculta hasta que termine la ronda.</div></div>`;
 }
 function scoreList(room) {
+  const isHost = state.me?.id === room.hostId;
+  const canManage = ['playing', 'tiebreak', 'loading-question', 'lobby'].includes(room.phase);
   return `<div class="score-list">${room.players.map((player, index) => {
     const isActive = player.id === room.currentTurnUserId && ['playing', 'tiebreak'].includes(room.phase);
     const tieEligible = room.tieScores && Object.hasOwn(room.tieScores, player.id);
     const visibleScore = room.phase === 'tiebreak' && tieEligible ? (room.tieScores[player.id] || 0) : player.score;
     const sub = room.phase === 'tiebreak' ? (tieEligible ? `Desempate · ${player.score} pts en partida` : 'Fuera del desempate') : `${player.reboundPoints} puntos de rebote`;
-    return `<div class="score-row ${isActive ? 'active' : ''}" style="${room.phase === 'tiebreak' && !tieEligible ? 'opacity:.45' : ''}"><div class="score-rank">${String(index + 1).padStart(2, '0')}</div><div><div class="score-name">${esc(player.username)} ${player.id === state.me?.id ? '<span style="color:var(--lime)">(tú)</span>' : ''}</div><div class="score-state">${isActive ? '● En turno' : esc(sub)}</div></div><div><div class="score-value">${number(visibleScore)}</div><div class="score-label">${room.phase === 'tiebreak' && tieEligible ? 'DESEMPATE' : 'PUNTOS'}</div></div></div>`;
+    const kickButton = isHost && canManage && player.id !== state.me?.id ? `<button class="btn btn-ghost btn-small" data-action="kick-room-player" data-user-id="${esc(player.id)}" data-username="${esc(player.username)}" title="Expulsar de la partida">Expulsar</button>` : '';
+    return `<div class="score-row ${isActive ? 'active' : ''}" style="${room.phase === 'tiebreak' && !tieEligible ? 'opacity:.45' : ''}"><div class="score-rank">${String(index + 1).padStart(2, '0')}</div><div><div class="score-name">${esc(player.username)} ${player.id === state.me?.id ? '<span style="color:var(--lime)">(tú)</span>' : ''}</div><div class="score-state">${isActive ? '● En turno' : esc(sub)}</div></div><div style="display:flex;align-items:center;gap:9px;justify-content:flex-end"><div><div class="score-value">${number(visibleScore)}</div><div class="score-label">${room.phase === 'tiebreak' && tieEligible ? 'DESEMPATE' : 'PUNTOS'}</div></div>${kickButton}</div></div>`;
   }).join('')}</div>`;
 }
 function gameTemplate() {
@@ -252,14 +256,17 @@ function gameTemplate() {
   const isMyTurn = state.me && room.currentTurnUserId === state.me.id;
   const progress = room.settings.scoringMode === 'questions' ? Math.min(100, (room.completedQuestions / room.settings.limitValue) * 100) : 0;
   const question = room.currentQuestion;
-  const turnBanner = activePhase
-    ? (isMyTurn ? `<div class="turn-banner">✦ <strong>Es tu turno.</strong> Escribe la respuesta que consideres correcta. ${room.attemptNumber > 1 ? `Esta pregunta ya ha rebotado ${room.attemptNumber - 1} ${room.attemptNumber === 2 ? 'vez' : 'veces'}.` : 'Si fallas, el siguiente jugador tendrá su oportunidad.'}</div>` : `<div class="turn-banner waiting">Turno de <strong>${esc(room.currentTurnUsername || 'otro jugador')}</strong>. ${room.attemptNumber > 1 ? `Intento de rebote nº ${room.attemptNumber}.` : 'Prepara tu respuesta para la siguiente pregunta.'}</div>`)
-    : `<div class="turn-banner waiting">${room.phase === 'loading-question' ? 'La IA está preparando la siguiente pregunta…' : 'Conectando con la partida…'}</div>`;
+  const turnBanner = room.roundTransition
+    ? '<div class="turn-banner waiting">Preparando la siguiente pregunta…</div>'
+    : activePhase
+      ? (isMyTurn ? `<div class="turn-banner">✦ <strong>Es tu turno.</strong> Escribe la respuesta que consideres correcta. ${room.attemptNumber > 1 ? `Esta pregunta ya ha rebotado ${room.attemptNumber - 1} ${room.attemptNumber === 2 ? 'vez' : 'veces'}.` : 'Si fallas, el siguiente jugador tendrá su oportunidad.'}</div>` : `<div class="turn-banner waiting">Turno de <strong>${esc(room.currentTurnUsername || 'otro jugador')}</strong>. ${room.attemptNumber > 1 ? `Intento de rebote nº ${room.attemptNumber}.` : 'Prepara tu respuesta para la siguiente pregunta.'}</div>`)
+      : `<div class="turn-banner waiting">${room.phase === 'loading-question' ? 'La IA está preparando la siguiente pregunta…' : 'Conectando con la partida…'}</div>`;
   const questionContent = question ? `<div class="question-meta"><span class="tag ${question.tieBreaker ? 'lime' : ''}">${question.tieBreaker ? `DESEMPATE · RONDA ${room.tieBreakRound}` : `PREGUNTA ${room.completedQuestions + 1}${room.settings.scoringMode === 'questions' ? ` / ${room.settings.limitValue}` : ''}`}</span><span class="tag">${topicEmoji(question.topic)} ${esc(question.topic || room.settings.topic)}</span></div><div class="question-text">${esc(question.question)}</div>` : `<div class="question-meta"><span class="tag">PREPARANDO PREGUNTA</span></div><div class="question-text" style="font-size:23px">La siguiente pregunta está a punto de aparecer.</div><div class="loader"></div>`;
-  const answerForm = activePhase && isMyTurn ? `<form class="answer-form" id="answer-form"><input class="field" id="answer-input" name="answer" maxlength="500" placeholder="Escribe tu respuesta…" value="${esc(state.answerDraft)}" autocomplete="off" required ${room.processing || !question ? 'disabled' : ''}><button class="btn btn-primary" type="submit" ${room.processing || !question ? 'disabled' : ''}>${room.processing ? 'Valorando…' : 'Enviar respuesta ↗'}</button></form><p class="muted small" style="margin:12px 0 0">No hay opciones: escribe con tus palabras. ${room.processing ? 'La respuesta se está valorando.' : 'Se aceptarán formulaciones equivalentes cuando proceda.'}</p>`
+  const answerForm = activePhase && isMyTurn ? `<form class="answer-form" id="answer-form"><input class="field" id="answer-input" name="answer" maxlength="500" placeholder="Escribe tu respuesta…" value="${esc(state.answerDraft)}" autocomplete="off" required ${room.processing || room.roundTransition || !question ? 'disabled' : ''}><button class="btn btn-primary" type="submit" ${room.processing || room.roundTransition || !question ? 'disabled' : ''}>${room.processing ? 'Valorando…' : room.roundTransition ? 'Preparando…' : 'Enviar respuesta ↗'}</button></form><p class="muted small" style="margin:12px 0 0">No hay opciones: escribe con tus palabras. ${room.processing ? 'La respuesta se está valorando.' : room.roundTransition ? 'Preparando la siguiente pregunta.' : 'Se aceptarán formulaciones equivalentes cuando proceda.'}</p>`
     : activePhase ? `<div class="empty-state">${room.processing ? 'Estamos valorando la respuesta…' : `La pregunta está en manos de ${esc(room.currentTurnUsername || 'otro jugador')}.`}<br>Podrás responder cuando llegue tu turno.</div>` : '';
+  const isHost = state.me?.id === room.hostId;
   return `
-    <div class="room-top"><div><div class="eyebrow">${room.mode === 'league' ? `Liga / ${esc(room.leagueName || '')}` : 'Partida rápida'} · Sala ${esc(room.code)}</div><h1>${room.phase === 'tiebreak' ? 'Desempate' : 'A pensar'}<span style="color:var(--lime)">.</span></h1><p class="muted small" style="margin:8px 0 0">${room.settings.scoringMode === 'questions' ? `${room.completedQuestions} de ${room.settings.limitValue} preguntas completadas` : `Gana quien llegue a ${room.settings.limitValue} puntos`}</p></div><button class="btn btn-ghost btn-small" data-action="copy-code">Código ${esc(room.code)} ⧉</button></div>
+    <div class="room-top"><div><div class="eyebrow">${room.mode === 'league' ? `Liga / ${esc(room.leagueName || '')}` : 'Partida rápida'} · Sala ${esc(room.code)}</div><h1>${room.phase === 'tiebreak' ? 'Desempate' : 'A pensar'}<span style="color:var(--lime)">.</span></h1><p class="muted small" style="margin:8px 0 0">${room.settings.scoringMode === 'questions' ? `${room.completedQuestions} de ${room.settings.limitValue} preguntas completadas` : `Gana quien llegue a ${room.settings.limitValue} puntos`}</p></div><div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end"><button class="btn btn-ghost btn-small" data-action="leave-room">Salir al menú</button>${isHost ? '<button class="btn btn-ghost btn-small" data-action="end-room">Terminar partida</button>' : ''}<button class="btn btn-ghost btn-small" data-action="copy-code">Código ${esc(room.code)} ⧉</button></div></div>
     ${room.settings.scoringMode === 'questions' && !room.tieBreaker ? `<div class="progress-track"><div class="progress-fill" style="width:${progress}%"></div></div>` : ''}
     <div class="game-layout">
       <section class="question-card">${turnBanner}${questionContent}${room.processing ? '<div class="notice" style="margin-top:15px">La respuesta está siendo valorada. No envíes otra hasta que termine.</div>' : ''}${answerForm}${gameFeedback(room)}
@@ -288,7 +295,7 @@ function leagueDetailTemplate() {
     <div class="room-top"><div><div class="eyebrow">Modo liga / Clasificación oficial</div><h1>${esc(league.name)}<span style="color:var(--lime)">.</span></h1><p class="muted small" style="margin:8px 0 0">Cada victoria suma 3 puntos. Los resultados se conservan entre sesiones.</p></div><div class="room-code">${esc(league.code)}</div></div>
     <div class="two-panels">
       <section class="panel"><div class="panel-head"><div><div class="eyebrow">La tabla</div><h2>Clasificación</h2></div><span class="tag lime">${data.standings.length} jugadores</span></div>
-        ${data.standings.length ? `<div class="table-wrap"><table class="standings"><thead><tr><th>#</th><th>Jugador</th><th>J</th><th>V</th><th>D</th><th>Pts</th></tr></thead><tbody>${data.standings.map((p, index) => `<tr><td><span class="rank-badge ${index === 0 ? 'first' : ''}">${index + 1}</span></td><td><strong>${esc(p.username)}${p.id === state.me?.id ? ' (tú)' : ''}</strong></td><td>${number(p.played)}</td><td>${number(p.wins)}</td><td>${number(p.losses)}</td><td style="color:${index === 0 ? 'var(--lime)' : 'var(--text)'};font-weight:800">${number(p.points)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-state">Todavía no hay jugadores en la clasificación.</div>'}
+        ${data.standings.length ? `<div class="table-wrap"><table class="standings"><thead><tr><th>#</th><th>Jugador</th><th>J</th><th>V</th><th>D</th><th>Pts</th>${String(league.creatorId) === String(state.me?.id) ? '<th>Acción</th>' : ''}</tr></thead><tbody>${data.standings.map((p, index) => `<tr><td><span class="rank-badge ${index === 0 ? 'first' : ''}">${index + 1}</span></td><td><strong>${esc(p.username)}${p.id === state.me?.id ? ' (tú)' : ''}</strong></td><td>${number(p.played)}</td><td>${number(p.wins)}</td><td>${number(p.losses)}</td><td style="color:${index === 0 ? 'var(--lime)' : 'var(--text)'};font-weight:800">${number(p.points)}</td>${String(league.creatorId) === String(state.me?.id) ? `<td>${String(p.id) !== String(league.creatorId) ? `<button class="btn btn-ghost btn-small" data-action="kick-league-member" data-user-id="${esc(p.id)}" data-username="${esc(p.username)}" data-league-code="${esc(league.code)}">Expulsar</button>` : '<span class="muted small">Host</span>'}</td>` : ''}</tr>`).join('')}</tbody></table></div>` : '<div class="empty-state">Todavía no hay jugadores en la clasificación.</div>'}
         <div class="separator"></div><div class="space-between"><div><div class="small muted">Código para invitar</div><div class="mono" style="color:var(--lime);margin-top:5px">${esc(league.code)}</div></div><button class="btn btn-ghost btn-small" data-action="copy-league-code">Copiar código ⧉</button></div>
       </section>
       <section class="panel"><div class="eyebrow">Duelo 1 contra 1</div><h2>Desafía a un jugador</h2><p class="muted small">Cada enfrentamiento puede tener una temática y unas reglas diferentes. Configura este duelo y comparte el código con alguien de la liga.</p>
@@ -401,7 +408,25 @@ function connectSocket() {
   });
   socket.on('room-closed', (data) => {
     toast(data?.message || 'La sala se ha cerrado.');
-    state.room = null; state.roomCode = ''; localStorage.removeItem('trivia-room-code'); state.view = 'dashboard'; render();
+    state.room = null; state.roomCode = ''; state.answerDraft = '';
+    localStorage.removeItem('trivia-room-code'); state.view = 'dashboard';
+    Promise.all([refreshProfile(), refreshMyLeagues()]).catch(() => {}).finally(render);
+  });
+  socket.on('room-kicked', (data) => {
+    toast(data?.message || 'El anfitrión te ha expulsado de la partida.');
+    state.room = null; state.roomCode = ''; state.answerDraft = '';
+    localStorage.removeItem('trivia-room-code'); state.view = 'dashboard';
+    Promise.all([refreshProfile(), refreshMyLeagues()]).catch(() => {}).finally(render);
+  });
+  socket.on('league-kicked', (data) => {
+    toast(data?.message || 'Te han expulsado de la liga.');
+    state.room = null; state.roomCode = ''; state.answerDraft = '';
+    localStorage.removeItem('trivia-room-code');
+    if (state.activeLeague && String(state.activeLeague.league?.code) === String(data?.leagueCode)) {
+      state.activeLeague = null;
+      state.view = 'leagues';
+    }
+    Promise.all([refreshProfile(), refreshMyLeagues()]).catch(() => {}).finally(render);
   });
 }
 async function refreshProfile() {
@@ -465,15 +490,31 @@ function emitJoinRoom(code, errorId, fallbackView) {
   });
 }
 async function backHome() {
-  if (state.room && socket?.connected) {
-    const phase = state.room.phase;
-    if (phase !== 'lobby' && phase !== 'finished') {
-      toast('La partida sigue en curso. No puedes salir desde aquí.');
+  const hasRoom = Boolean(state.room || state.roomCode);
+  const activeGame = state.room && ['playing', 'tiebreak', 'loading-question'].includes(state.room.phase);
+  if (activeGame) {
+    const warning = state.room.mode === 'league'
+      ? 'Si sales ahora, tu rival ganará el duelo por retirada y sumará 3 puntos a la liga. ¿Quieres salir?'
+      : '¿Salir al menú? La partida continuará para los demás jugadores.';
+    if (!window.confirm(warning)) return;
+  }
+  if (hasRoom && socket?.connected) {
+    const result = await new Promise((resolve) => {
+      let settled = false;
+      let timeoutId;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        resolve(value);
+      };
+      socket.emit('leave-room', {}, (response) => finish(response || { ok: false, error: 'El servidor no ha confirmado la salida.' }));
+      timeoutId = setTimeout(() => finish({ ok: false, error: 'No se ha recibido confirmación del servidor. Comprueba tu conexión y vuelve a intentarlo.' }), 1800);
+    });
+    if (!result?.ok) {
+      toast(result?.error || 'No se ha podido salir de la partida.');
       return;
     }
-    socket.emit('leave-room', {}, (result) => {
-      if (!result?.ok) toast(result?.error || 'No se ha podido salir de la sala.');
-    });
   }
   state.room = null;
   state.roomCode = '';
@@ -515,6 +556,35 @@ app.addEventListener('click', async (event) => {
     socket?.emit('start-room', {}, (result) => { if (!result?.ok) toast(result?.error || 'No se pudo iniciar la partida.'); });
   }
   else if (action === 'leave-room') await backHome();
+  else if (action === 'end-room') {
+    if (!socket?.connected) { toast('No hay conexión con el servidor. Espera a reconectarte para terminar la partida.'); return; }
+    if (!window.confirm('¿Terminar la partida para todos? No habrá ganador y el duelo no sumará puntos a la liga.')) return;
+    socket.emit('end-room', {}, (result) => {
+      if (!result?.ok) toast(result?.error || 'No se pudo terminar la partida.');
+      // El servidor enviará room-closed a todos si la operación se completa.
+    });
+  }
+  else if (action === 'kick-room-player') {
+    const userId = button.dataset.userId;
+    const username = button.dataset.username || 'este jugador';
+    if (!window.confirm(`¿Expulsar a ${username} de esta partida?`)) return;
+    socket?.emit('kick-room-player', { userId }, (result) => {
+      if (!result?.ok) toast(result?.error || 'No se pudo expulsar al jugador.');
+      else toast(`${username} ha sido expulsado de la partida.`);
+    });
+  }
+  else if (action === 'kick-league-member') {
+    const userId = button.dataset.userId;
+    const username = button.dataset.username || 'este jugador';
+    const code = button.dataset.leagueCode;
+    if (!window.confirm(`¿Expulsar a ${username} de esta liga? Se eliminará de la clasificación de la liga, pero no se borrará su perfil ni el historial de partidas ya terminadas.`)) return;
+    try {
+      await api(`/api/leagues/${encodeURIComponent(code)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+      await refreshMyLeagues();
+      await loadLeague(code);
+      toast(`${username} ha sido expulsado de la liga.`);
+    } catch (error) { toast(error.message || 'No se pudo expulsar al usuario de la liga.'); }
+  }
   else if (action === 'rematch') {
     const room = state.room;
     if (!room) { state.view = 'quick'; render(); return; }

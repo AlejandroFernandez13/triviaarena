@@ -53,6 +53,12 @@ async function initDatabase() {
       joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (league_id, user_id)
     );
+    CREATE TABLE IF NOT EXISTS league_bans (
+      league_id BIGINT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      banned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (league_id, user_id)
+    );
     CREATE TABLE IF NOT EXISTS league_standings (
       league_id BIGINT NOT NULL REFERENCES leagues(id) ON DELETE CASCADE,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -330,6 +336,8 @@ app.post('/api/leagues/join', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT id FROM leagues WHERE code=$1', [code]);
     if (!rows.length) return res.status(404).json({ error: 'No hay ninguna liga con ese código.' });
+    const { rows: bannedRows } = await pool.query('SELECT 1 FROM league_bans WHERE league_id=$1 AND user_id=$2', [rows[0].id, currentUserId(req)]);
+    if (bannedRows.length) return res.status(403).json({ error: 'El anfitrión te ha expulsado de esta liga.' });
     await pool.query('INSERT INTO league_members (league_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [rows[0].id, currentUserId(req)]);
     await pool.query('INSERT INTO league_standings (league_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [rows[0].id, currentUserId(req)]);
     res.json(await leaguePayload(code, currentUserId(req)));
@@ -349,6 +357,50 @@ app.get('/api/leagues/:code', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Error cargando liga:', error);
     res.status(500).json({ error: 'No se pudo cargar la liga.' });
+  }
+});
+
+app.delete('/api/leagues/:code/members/:memberId', requireAuth, async (req, res) => {
+  const code = cleanCode(req.params.code);
+  const memberId = String(req.params.memberId || '');
+  const actorId = currentUserId(req);
+  if (!/^\d+$/.test(memberId)) return res.status(400).json({ error: 'El identificador del usuario no es válido.' });
+  try {
+    const { rows: leagueRows } = await pool.query('SELECT id, created_by FROM leagues WHERE code=$1', [code]);
+    if (!leagueRows.length) return res.status(404).json({ error: 'No se ha encontrado esa liga.' });
+    const league = leagueRows[0];
+    if (String(league.created_by) !== actorId) return res.status(403).json({ error: 'Solo quien creó la liga puede expulsar a sus miembros.' });
+    if (memberId === actorId) return res.status(400).json({ error: 'No puedes expulsarte a ti mismo como creador de la liga.' });
+    const { rows: memberRows } = await pool.query('SELECT 1 FROM league_members WHERE league_id=$1 AND user_id=$2', [league.id, memberId]);
+    if (!memberRows.length) return res.status(404).json({ error: 'Ese usuario no pertenece a esta liga.' });
+
+    // Actualiza primero la membresía de forma transaccional para que el navegador
+    // expulsado no pueda volver a entrar mientras se notifican las salas en directo.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('INSERT INTO league_bans (league_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [league.id, memberId]);
+      await client.query('DELETE FROM league_members WHERE league_id=$1 AND user_id=$2', [league.id, memberId]);
+      await client.query('DELETE FROM league_standings WHERE league_id=$1 AND user_id=$2', [league.id, memberId]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+    const notifiedSocketIds = await expelLeagueMemberFromLiveRooms(String(league.id), memberId, code);
+
+    // Notifica también a las sesiones del usuario que no estuvieran dentro de un duelo.
+    for (const targetSocket of io.sockets.sockets.values()) {
+      if (targetSocket.data.userId === memberId && !notifiedSocketIds.has(targetSocket.id)) {
+        targetSocket.emit('league-kicked', { leagueCode: code, message: 'Te han expulsado de la liga.' });
+      }
+    }
+    res.json({ ok: true, message: 'Usuario expulsado de la liga.' });
+  } catch (error) {
+    console.error('Error expulsando miembro de liga:', error);
+    res.status(500).json({ error: error.message || 'No se pudo expulsar al usuario de la liga.' });
   }
 });
 
@@ -380,6 +432,7 @@ io.use((socket, next) => {
 const rooms = new Map();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const allPlayers = (room) => room.players;
+const activePlayers = (room) => room.players.filter((player) => player.active !== false);
 const findPlayer = (room, userId) => room.players.find((player) => player.id === String(userId));
 function shuffled(items) {
   const arr = [...items];
@@ -396,6 +449,9 @@ function rotateIds(order, startId) {
 }
 function publicRoom(room) {
   const playerById = new Map(room.players.map((p) => [p.id, p]));
+  // Durante la partida se excluye a quienes han salido o han sido expulsados;
+  // en el marcador final se conserva la lista histórica de participantes.
+  const visiblePlayers = room.phase === 'finished' ? room.players : activePlayers(room);
   return {
     code: room.code,
     mode: room.mode,
@@ -404,10 +460,14 @@ function publicRoom(room) {
     hostId: room.hostId,
     phase: room.phase,
     settings: room.settings,
-    players: room.players.map((p) => ({
+    players: visiblePlayers.map((p) => ({
       id: p.id, username: p.username, score: p.score,
       correctAnswers: p.correctAnswers, reboundPoints: p.reboundPoints,
-    })).sort((a, b) => room.turnOrder.indexOf(a.id) - room.turnOrder.indexOf(b.id)),
+    })).sort((a, b) => {
+      const ai = room.turnOrder.indexOf(a.id);
+      const bi = room.turnOrder.indexOf(b.id);
+      return (ai < 0 ? Number.MAX_SAFE_INTEGER : ai) - (bi < 0 ? Number.MAX_SAFE_INTEGER : bi);
+    }),
     turnOrder: room.turnOrder,
     currentQuestion: room.question ? {
       question: room.question.question,
@@ -421,6 +481,7 @@ function publicRoom(room) {
     attemptNumber: room.attemptIndex + 1,
     attemptsInQuestion: room.attemptOrder.length,
     processing: room.processing,
+    roundTransition: Boolean(room.roundTransition),
     completedQuestions: room.completedQuestions,
     tieScores: room.tieBreaker ? room.tieScores : null,
     lastResult: room.lastResult,
@@ -434,6 +495,147 @@ function publishRoom(room) {
 }
 function ackError(ack, error) {
   if (typeof ack === 'function') ack({ ok: false, error });
+}
+
+function detachPlayerSockets(room, player, eventName = null, payload = null) {
+  const notified = new Set();
+  for (const socketId of player.sockets || []) {
+    const targetSocket = io.sockets.sockets.get(socketId);
+    if (!targetSocket) continue;
+    if (eventName) targetSocket.emit(eventName, payload || {});
+    notified.add(targetSocket.id);
+    targetSocket.leave(room.code);
+    if (targetSocket.data.roomCode === room.code) targetSocket.data.roomCode = null;
+  }
+  player.sockets?.clear?.();
+  return notified;
+}
+
+async function abandonRoom(room, message = 'La partida ha terminado sin resultado.') {
+  if (!room || room.phase === 'closed') return;
+  room.phase = 'closed';
+  room.processing = false;
+  room.roundTransition = false;
+  room.currentTurnUserId = null;
+  rooms.delete(room.code);
+  await pool.query("UPDATE matches SET status='abandoned', finished_at=NOW() WHERE id=$1 AND status <> 'finished'", [room.id]).catch((error) => {
+    console.error('No se pudo guardar el cierre de la sala:', error);
+  });
+  io.to(room.code).emit('room-closed', { message });
+  for (const player of room.players) {
+    for (const socketId of player.sockets || []) {
+      const targetSocket = io.sockets.sockets.get(socketId);
+      if (!targetSocket) continue;
+      targetSocket.leave(room.code);
+      if (targetSocket.data.roomCode === room.code) targetSocket.data.roomCode = null;
+    }
+    player.sockets?.clear?.();
+  }
+}
+
+function adjustTurnAfterRemoval(room, userId) {
+  room.turnOrder = room.turnOrder.filter((id) => id !== userId);
+  if (room.tieScores && Object.hasOwn(room.tieScores, userId)) delete room.tieScores[userId];
+  const oldIndex = room.attemptOrder.indexOf(userId);
+  let wasCurrent = false;
+  if (oldIndex >= 0) {
+    wasCurrent = room.currentTurnUserId === userId;
+    if (oldIndex < room.attemptIndex) room.attemptIndex = Math.max(0, room.attemptIndex - 1);
+    room.attemptOrder = room.attemptOrder.filter((id) => id !== userId);
+    if (wasCurrent) room.currentTurnUserId = room.attemptOrder[room.attemptIndex] || null;
+    else room.currentTurnUserId = room.attemptOrder[room.attemptIndex] || null;
+  }
+  if (room.turnOrder.length) room.nextStarterIndex %= room.turnOrder.length;
+  else room.nextStarterIndex = 0;
+  if (room.tieScores && Object.keys(room.tieScores).length) room.tieNextStarterIndex %= Object.keys(room.tieScores).length;
+  else room.tieNextStarterIndex = 0;
+  return { wasCurrent, questionExhausted: wasCurrent && !room.currentTurnUserId };
+}
+
+async function removeRoomPlayer(room, player, { kicked = false, leagueRemoval = false } = {}) {
+  if (!player) throw new Error('No se ha encontrado a ese jugador en la sala.');
+  const userId = String(player.id);
+  const wasLobby = room.phase === 'lobby';
+  const wasActiveGame = ['playing', 'tiebreak', 'loading-question'].includes(room.phase);
+  if (room.processing && wasActiveGame) throw new Error('Espera a que termine la valoración de la respuesta y vuelve a intentarlo.');
+
+  if (kicked) room.bannedUserIds.add(userId);
+  if (wasLobby) {
+    detachPlayerSockets(room, player, kicked ? (leagueRemoval ? 'league-kicked' : 'room-kicked') : null,
+      { code: room.code, leagueCode: room.code, message: kicked ? (leagueRemoval ? 'Te han expulsado de la liga.' : 'El anfitrión te ha expulsado de la partida.') : '' });
+    room.players = room.players.filter((p) => p.id !== userId);
+    room.turnOrder = room.turnOrder.filter((id) => id !== userId);
+    await pool.query('DELETE FROM match_players WHERE match_id=$1 AND user_id=$2', [room.id, userId]).catch(() => {});
+    if (room.hostId === userId) room.hostId = activePlayers(room)[0]?.id || room.hostId;
+    publishRoom(room);
+    return new Set();
+  }
+
+  if (wasActiveGame) {
+    player.active = false;
+    const notified = detachPlayerSockets(room, player, kicked ? (leagueRemoval ? 'league-kicked' : 'room-kicked') : null,
+      { code: room.code, leagueCode: room.mode === 'league' ? undefined : null, message: kicked ? (leagueRemoval ? 'Te han expulsado de la liga. El duelo se ha cancelado.' : 'El anfitrión te ha expulsado de la partida.') : '' });
+    const turnChange = adjustTurnAfterRemoval(room, userId);
+    const remaining = activePlayers(room);
+    const remainingTiePlayers = room.tieBreaker ? Object.keys(room.tieScores || {}) : [];
+
+    if (room.mode === 'league' && (kicked || leagueRemoval)) {
+      await abandonRoom(room, 'El duelo se ha cancelado por una expulsión. No se han sumado puntos a la liga.');
+      return notified;
+    }
+    if (remaining.length === 0) {
+      await abandonRoom(room, 'Todos los jugadores han abandonado la partida. No hay ganador.');
+      return notified;
+    }
+    if (room.tieBreaker && remainingTiePlayers.length === 1) {
+      await finishMatch(room, remainingTiePlayers[0]);
+      return notified;
+    }
+    if (remaining.length === 1) {
+      await finishMatch(room, remaining[0].id);
+      return notified;
+    }
+    if (room.hostId === userId) room.hostId = remaining[0].id;
+    if (turnChange.questionExhausted && room.phase !== 'loading-question' && !room.roundTransition) {
+      publishRoom(room);
+      await finishQuestionRound(room, null);
+    } else {
+      if (!room.currentTurnUserId && room.phase !== 'loading-question') room.currentTurnUserId = room.attemptOrder[room.attemptIndex] || null;
+      publishRoom(room);
+    }
+    return notified;
+  }
+
+  // En una partida ya terminada se permite abandonar la pantalla sin tocar el resultado.
+  detachPlayerSockets(room, player);
+  return new Set();
+}
+
+async function expelLeagueMemberFromLiveRooms(leagueId, memberId, leagueCode) {
+  const notified = new Set();
+  for (const room of [...rooms.values()]) {
+    if (room.mode !== 'league' || String(room.leagueId) !== String(leagueId) || room.phase === 'finished' || room.phase === 'closed') continue;
+    const player = findPlayer(room, memberId);
+    if (!player || player.active === false) continue;
+    if (room.phase === 'lobby') {
+      room.bannedUserIds.add(String(memberId));
+      player.active = false;
+      const sent = detachPlayerSockets(room, player, 'league-kicked', { code: room.code, leagueCode, message: 'Te han expulsado de la liga y has salido del duelo.' });
+      sent.forEach((id) => notified.add(id));
+      room.players = room.players.filter((p) => p.id !== String(memberId));
+      room.turnOrder = room.turnOrder.filter((id) => id !== String(memberId));
+      await pool.query('DELETE FROM match_players WHERE match_id=$1 AND user_id=$2', [room.id, memberId]).catch(() => {});
+      if (room.hostId === String(memberId)) room.hostId = activePlayers(room)[0]?.id || room.hostId;
+      publishRoom(room);
+    } else if (['playing', 'tiebreak', 'loading-question'].includes(room.phase)) {
+      room.bannedUserIds.add(String(memberId));
+      player.active = false;
+      const sent = detachPlayerSockets(room, player, 'league-kicked', { code: room.code, leagueCode, message: 'Te han expulsado de la liga. El duelo se ha cancelado.' });
+      sent.forEach((id) => notified.add(id));
+      await abandonRoom(room, 'El duelo se ha cancelado porque se ha expulsado a un miembro de la liga. No se han sumado puntos.');
+    }
+  }
+  return notified;
 }
 async function assertLeagueMember(leagueId, userId) {
   const { rows } = await pool.query(`
@@ -466,11 +668,12 @@ async function createRoomForUser(socket, payload) {
   const room = {
     id: matchId, code, mode, leagueId, leagueName, hostId: userId,
     settings, topic: settings.topic, phase: 'lobby',
-    players: [{ id: userId, username: userRows[0].username, score: 0, correctAnswers: 0, reboundPoints: 0, sockets: new Set([socket.id]) }],
+    players: [{ id: userId, username: userRows[0].username, score: 0, correctAnswers: 0, reboundPoints: 0, active: true, sockets: new Set([socket.id]) }],
+    bannedUserIds: new Set(),
     turnOrder: [userId], nextStarterIndex: 0, tieNextStarterIndex: 0,
     question: null, questionHistory: [], completedQuestions: 0,
     currentTurnUserId: null, attemptOrder: [], attemptIndex: 0,
-    failedQuestionIds: new Set(), processing: false, lastResult: null,
+    failedQuestionIds: new Set(), processing: false, roundTransition: false, lastResult: null,
     tieBreaker: false, tieScores: {}, tieBreakRound: 0,
     winnerId: null,
   };
@@ -485,8 +688,10 @@ async function createRoomForUser(socket, payload) {
 
 async function addPlayerToRoom(socket, room) {
   const userId = socket.data.userId;
+  if (room.bannedUserIds?.has(userId)) throw new Error('El anfitrión te ha expulsado de esta sala.');
   const existing = findPlayer(room, userId);
   if (existing) {
+    if (existing.active === false) throw new Error('Ya no puedes volver a entrar en esta partida.');
     existing.sockets.add(socket.id);
     socket.join(room.code);
     socket.data.roomCode = room.code;
@@ -501,7 +706,7 @@ async function addPlayerToRoom(socket, room) {
   const { rows } = await pool.query('SELECT id, username FROM users WHERE id=$1', [userId]);
   if (!rows.length) throw new Error('No se encuentra tu perfil.');
   await pool.query('INSERT INTO match_players (match_id,user_id) VALUES ($1,$2)', [room.id, userId]);
-  room.players.push({ id: userId, username: rows[0].username, score: 0, correctAnswers: 0, reboundPoints: 0, sockets: new Set([socket.id]) });
+  room.players.push({ id: userId, username: rows[0].username, score: 0, correctAnswers: 0, reboundPoints: 0, active: true, sockets: new Set([socket.id]) });
   if (!room.turnOrder.includes(userId)) room.turnOrder.push(userId);
   socket.join(room.code);
   socket.data.roomCode = room.code;
@@ -520,8 +725,10 @@ async function addOnePoint(room, player, isRebound) {
 }
 
 function highestScorers(room) {
-  const max = Math.max(...room.players.map((player) => player.score));
-  return room.players.filter((player) => player.score === max);
+  const players = activePlayers(room);
+  if (!players.length) return [];
+  const max = Math.max(...players.map((player) => player.score));
+  return players.filter((player) => player.score === max);
 }
 function hasTieBreakWinner(room) {
   const values = Object.entries(room.tieScores);
@@ -534,9 +741,10 @@ function hasTieBreakWinner(room) {
 }
 
 async function finishMatch(room, winnerId) {
-  if (room.phase === 'finished') return;
+  if (room.phase === 'finished' || room.phase === 'closed' || !rooms.has(room.code)) return;
   room.phase = 'finished';
   room.processing = false;
+  room.roundTransition = false;
   room.winnerId = winnerId || null;
   room.currentTurnUserId = null;
   room.lastResult = {
@@ -572,8 +780,9 @@ async function finishMatch(room, winnerId) {
 }
 
 async function startRound(room, isTieBreaker = false) {
-  if (room.phase === 'finished') return;
+  if (room.phase === 'finished' || room.phase === 'closed' || !rooms.has(room.code)) return;
   room.processing = false;
+  room.roundTransition = false;
   room.lastResult = null;
   room.question = null;
   room.phase = 'loading-question';
@@ -587,9 +796,11 @@ async function startRound(room, isTieBreaker = false) {
     room.tieNextStarterIndex = (idx + 1) % eligible.length;
     room.attemptOrder = rotateIds(eligible, starterId);
   } else {
-    if (room.completedQuestions === 0 && room.turnOrder.length !== room.players.length) {
-      room.turnOrder = room.players.map((p) => p.id);
+    const activeIds = activePlayers(room).map((p) => p.id);
+    if (room.completedQuestions === 0 && (room.turnOrder.length !== activeIds.length || room.turnOrder.some((id) => !activeIds.includes(id)))) {
+      room.turnOrder = activeIds;
     }
+    if (!room.turnOrder.length) return abandonRoom(room, 'No quedan jugadores activos en la partida.');
     const starterIdx = room.nextStarterIndex % room.turnOrder.length;
     const starterId = room.turnOrder[starterIdx];
     room.nextStarterIndex = (starterIdx + 1) % room.turnOrder.length;
@@ -601,6 +812,7 @@ async function startRound(room, isTieBreaker = false) {
   publishRoom(room);
   try {
     const q = await generateQuestion(room.topic, room.questionHistory);
+    if (room.phase === 'closed' || room.phase === 'finished' || !rooms.has(room.code)) return;
     room.question = q;
     // Guardar toda la partida (incluida la solución internamente) para evitar repeticiones.
     // Esta historia solo se usa en el servidor y no se envía a los jugadores.
@@ -609,6 +821,7 @@ async function startRound(room, isTieBreaker = false) {
     room.currentTurnUserId = room.attemptOrder[0];
     publishRoom(room);
   } catch (error) {
+    if (room.phase === 'closed' || room.phase === 'finished' || !rooms.has(room.code)) return;
     console.error('No se pudo preparar una pregunta:', error);
     room.phase = 'playing';
     room.question = { question: 'No se pudo generar la pregunta. Intenta responder con una idea válida.', answer: '', acceptedAnswers: [], explanation: '', topic: room.topic };
@@ -617,6 +830,8 @@ async function startRound(room, isTieBreaker = false) {
 }
 
 async function finishQuestionRound(room, scorerId = null) {
+  if (room.phase === 'finished' || room.phase === 'closed' || !rooms.has(room.code)) return;
+  room.roundTransition = true;
   if (room.tieBreaker) {
     const tieWinner = hasTieBreakWinner(room);
     if (tieWinner) return finishMatch(room, tieWinner);
@@ -673,8 +888,9 @@ io.on('connection', (socket) => {
   socket.on('rejoin-room', (payload, ack) => {
     const code = cleanCode(payload?.code);
     const room = rooms.get(code);
-    if (!room || !findPlayer(room, socket.data.userId)) return ackError(ack, 'Esa partida ya no está disponible en este servidor.');
+    if (!room) return ackError(ack, 'Esa partida ya no está disponible en este servidor.');
     const player = findPlayer(room, socket.data.userId);
+    if (!player || player.active === false || room.bannedUserIds?.has(socket.data.userId)) return ackError(ack, 'Ya no puedes volver a entrar en esta partida.');
     player.sockets.add(socket.id);
     socket.join(room.code);
     socket.data.roomCode = room.code;
@@ -689,9 +905,10 @@ io.on('connection', (socket) => {
         if (!room) throw new Error('No se encuentra la sala.');
         if (room.hostId !== socket.data.userId) throw new Error('Solo el anfitrión puede empezar la partida.');
         if (room.phase !== 'lobby') throw new Error('La partida ya ha comenzado.');
-        if (room.players.length < 2) throw new Error('Necesitáis al menos 2 jugadores.');
-        if (room.mode === 'league' && room.players.length !== 2) throw new Error('Una partida de liga debe tener exactamente 2 jugadores.');
-        room.turnOrder = shuffled(room.players.map((player) => player.id));
+        const currentPlayers = activePlayers(room);
+        if (currentPlayers.length < 2) throw new Error('Necesitáis al menos 2 jugadores.');
+        if (room.mode === 'league' && currentPlayers.length !== 2) throw new Error('Una partida de liga debe tener exactamente 2 jugadores.');
+        room.turnOrder = shuffled(activePlayers(room).map((player) => player.id));
         room.nextStarterIndex = 0;
         room.completedQuestions = 0;
         room.tieBreaker = false;
@@ -710,6 +927,7 @@ io.on('connection', (socket) => {
       if (!room) return ackError(ack, 'La sala ya no está disponible.');
       if (!['playing', 'tiebreak'].includes(room.phase) || room.phase === 'loading-question') return ackError(ack, 'Ahora mismo no se puede responder.');
       if (room.processing) return ackError(ack, 'Estamos valorando una respuesta. Espera un momento.');
+      if (room.roundTransition) return ackError(ack, 'La siguiente pregunta se está preparando. Espera un momento.');
       if (room.currentTurnUserId !== socket.data.userId) return ackError(ack, 'Todavía no es tu turno.');
       const answer = typeof payload?.answer === 'string' ? payload.answer.trim().slice(0, 500) : '';
       if (!answer) return ackError(ack, 'Escribe una respuesta antes de enviarla.');
@@ -720,6 +938,8 @@ io.on('connection', (socket) => {
       const player = findPlayer(room, socket.data.userId);
       try {
         const judged = await gradeAnswer(room.question, answer);
+        // El anfitrión puede terminar la partida mientras la valoración está pendiente.
+        if (room.phase === 'closed' || room.phase === 'finished' || !rooms.has(room.code)) return;
         room.processing = false;
         if (judged.correct) {
           const wasRebound = room.attemptIndex > 0;
@@ -775,32 +995,118 @@ io.on('connection', (socket) => {
 
   socket.on('leave-room', (_payload, ack) => {
     (async () => {
-      const room = rooms.get(socket.data.roomCode);
-      if (!room) return ackError(ack, 'No estás en una sala activa.');
-      if (room.phase !== 'lobby' && room.phase !== 'finished') return ackError(ack, 'No puedes abandonar una partida en curso desde aquí. Puedes cerrar la pestaña y volver a conectarte con el mismo perfil.');
+      const code = socket.data.roomCode;
+      const room = code ? rooms.get(code) : null;
+      if (!room) {
+        socket.data.roomCode = null;
+        if (code) socket.leave(code);
+        if (typeof ack === 'function') ack({ ok: true });
+        return;
+      }
       const player = findPlayer(room, socket.data.userId);
-      if (room.phase === 'finished') {
+      if (room.phase === 'closed') {
         socket.leave(room.code);
         socket.data.roomCode = null;
         if (typeof ack === 'function') ack({ ok: true });
         return;
       }
-      if (player) {
+      if (room.phase === 'finished') {
+        socket.leave(room.code);
+        socket.data.roomCode = null;
+        if (player) player.sockets.delete(socket.id);
+        if (typeof ack === 'function') ack({ ok: true });
+        return;
+      }
+      if (!player || player.active === false) {
+        socket.leave(room.code);
+        socket.data.roomCode = null;
+        if (typeof ack === 'function') ack({ ok: true });
+        return;
+      }
+      if (room.processing) return ackError(ack, 'Espera a que termine la valoración de la respuesta y vuelve a salir.');
+
+      if (room.phase === 'lobby' && room.hostId === socket.data.userId) {
+        await abandonRoom(room, 'El anfitrión ha cerrado la sala.');
+        if (typeof ack === 'function') ack({ ok: true });
+        return;
+      }
+
+      if (room.phase === 'lobby') {
+        detachPlayerSockets(room, player);
         room.players = room.players.filter((p) => p.id !== player.id);
         room.turnOrder = room.turnOrder.filter((id) => id !== player.id);
         await pool.query('DELETE FROM match_players WHERE match_id=$1 AND user_id=$2', [room.id, player.id]).catch(() => {});
-      }
-      if (room.phase === 'lobby' && room.hostId === socket.data.userId) {
-        room.phase = 'closed';
-        rooms.delete(room.code);
-        await pool.query("UPDATE matches SET status='abandoned' WHERE id=$1", [room.id]).catch(() => {});
-        io.to(room.code).emit('room-closed', { message: 'El anfitrión ha cerrado la sala.' });
-      } else if (room.phase === 'lobby') {
         publishRoom(room);
+        if (typeof ack === 'function') ack({ ok: true });
+        return;
       }
-      socket.leave(room.code);
+
+      if (['playing', 'tiebreak', 'loading-question'].includes(room.phase)) {
+        player.active = false;
+        detachPlayerSockets(room, player);
+        const turnChange = adjustTurnAfterRemoval(room, player.id);
+        const remaining = activePlayers(room);
+        const remainingTiePlayers = room.tieBreaker ? Object.keys(room.tieScores || {}) : [];
+        if (!remaining.length) {
+          await abandonRoom(room, 'Todos los jugadores han abandonado la partida. No hay ganador.');
+        } else if (room.tieBreaker && remainingTiePlayers.length === 1) {
+          await finishMatch(room, remainingTiePlayers[0]);
+        } else if (remaining.length === 1) {
+          // En duelos de liga, quien permanece gana por retirada del rival.
+          await finishMatch(room, remaining[0].id);
+        } else {
+          if (room.hostId === player.id) room.hostId = remaining[0].id;
+          if (turnChange.questionExhausted && room.phase !== 'loading-question' && !room.roundTransition) {
+            publishRoom(room);
+            await finishQuestionRound(room, null);
+          } else {
+            publishRoom(room);
+          }
+        }
+        if (typeof ack === 'function') ack({ ok: true });
+        return;
+      }
+
+      detachPlayerSockets(room, player);
       socket.data.roomCode = null;
       if (typeof ack === 'function') ack({ ok: true });
+    })().catch((error) => {
+      console.error('Error saliendo de la partida:', error);
+      ackError(ack, 'No se ha podido salir de la partida. Inténtalo otra vez.');
+    });
+  });
+
+  socket.on('kick-room-player', (payload, ack) => {
+    (async () => {
+      try {
+        const room = rooms.get(socket.data.roomCode);
+        if (!room) throw new Error('No se encuentra la partida.');
+        if (room.hostId !== socket.data.userId) throw new Error('Solo el anfitrión de la partida puede expulsar jugadores.');
+        if (room.phase === 'finished' || room.phase === 'closed') throw new Error('La partida ya ha terminado.');
+        const targetId = String(payload?.userId || '');
+        if (!targetId || targetId === socket.data.userId) throw new Error('No puedes expulsarte a ti mismo. Usa «Salir al menú».');
+        const player = findPlayer(room, targetId);
+        if (!player || player.active === false) throw new Error('Ese jugador ya no está en la sala.');
+        await removeRoomPlayer(room, player, { kicked: true });
+        if (typeof ack === 'function') ack({ ok: true });
+      } catch (error) {
+        ackError(ack, error.message || 'No se pudo expulsar al jugador.');
+      }
+    })();
+  });
+
+  socket.on('end-room', (_payload, ack) => {
+    (async () => {
+      try {
+        const room = rooms.get(socket.data.roomCode);
+        if (!room) throw new Error('No se encuentra la partida.');
+        if (room.hostId !== socket.data.userId) throw new Error('Solo el anfitrión puede terminar la partida.');
+        if (room.phase === 'finished' || room.phase === 'closed') throw new Error('La partida ya ha terminado.');
+        await abandonRoom(room, 'El anfitrión ha terminado la partida. No se ha declarado ganador y no se suman puntos a la liga.');
+        if (typeof ack === 'function') ack({ ok: true });
+      } catch (error) {
+        ackError(ack, error.message || 'No se pudo terminar la partida.');
+      }
     })();
   });
 
