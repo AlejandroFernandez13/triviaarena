@@ -25,3 +25,16 @@
 .account-logout-panel p{max-width:620px}
 @media(max-width:850px){.account-layout{grid-template-columns:1fr}}
 @media(max-width:560px){.dashboard-actions{width:100%}.dashboard-actions .btn{flex:1}.account-panel{padding:19px}.account-summary{align-items:flex-start}.account-avatar-wrap{width:70px;height:70px;border-radius:20px}.account-logout-panel{align-items:stretch;flex-direction:column;padding:19px}.account-logout-panel .btn{width:100%}.top-user-avatar{width:25px;height:25px}.top-status{gap:8px}}
+
+/* Fotos de perfil visibles para todos los participantes (v1.9) */
+.player-avatar:not(.avatar-fallback){display:block;object-fit:cover;overflow:hidden;border:1px solid rgba(199,243,107,.25)}
+.score-player-cell{display:flex;align-items:center;gap:10px;min-width:0}
+.score-player-text{min-width:0;overflow:hidden}
+.score-avatar{width:32px;height:32px;flex:0 0 32px;border-radius:50%;object-fit:cover;overflow:hidden;border:1px solid rgba(199,243,107,.25);background:#2d354b;color:var(--lime);font-size:11px;font-weight:800}
+.score-avatar:not(.avatar-fallback){display:block}
+.score-avatar.avatar-fallback{display:inline-grid;place-items:center}
+.league-player-cell{display:flex;align-items:center;gap:9px;min-width:0}
+.league-avatar{width:29px;height:29px;flex:0 0 29px;border-radius:50%;object-fit:cover;overflow:hidden;border:1px solid rgba(199,243,107,.25);background:#2d354b;color:var(--lime);font-size:10px;font-weight:800}
+.league-avatar:not(.avatar-fallback){display:block}
+.league-avatar.avatar-fallback{display:inline-grid;place-items:center}
+.league-player-cell strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

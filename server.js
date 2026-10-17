@@ -229,6 +229,15 @@ app.patch('/api/account/profile', requireAuth, accountLimiter, async (req, res) 
     `, [username, normalized, hasAvatarField, avatarData, userId]);
     if (!rows.length) return res.status(404).json({ error: 'No se encontró el perfil.' });
     req.session.username = rows[0].username;
+    // Si este usuario mantiene otra pestaña con una sala conectada, propaga su
+    // nombre y foto nuevos al estado en vivo para que los demás los vean al instante.
+    for (const room of rooms.values()) {
+      const roomPlayer = findPlayer(room, userId);
+      if (!roomPlayer) continue;
+      roomPlayer.username = rows[0].username;
+      roomPlayer.avatarData = rows[0].avatar_data || null;
+      publishRoom(room);
+    }
     req.session.save((error) => {
       if (error) return res.status(500).json({ error: 'El perfil se guardó, pero no se pudo actualizar la sesión. Recarga la web.' });
       return res.json({ user: { id: String(rows[0].id), username: rows[0].username, avatarData: rows[0].avatar_data || null, createdAt: rows[0].created_at } });
@@ -326,7 +335,7 @@ async function leaguePayload(code, userId) {
   const { rows: membership } = await pool.query('SELECT 1 FROM league_members WHERE league_id=$1 AND user_id=$2', [league.id, userId]);
   if (!membership.length) return { notMember: true };
   const { rows: standings } = await pool.query(`
-    SELECT u.id, u.username, ls.played, ls.wins, ls.losses, ls.points
+    SELECT u.id, u.username, u.avatar_data, ls.played, ls.wins, ls.losses, ls.points
     FROM league_members lm JOIN users u ON u.id=lm.user_id
     JOIN league_standings ls ON ls.league_id=lm.league_id AND ls.user_id=lm.user_id
     WHERE lm.league_id=$1
@@ -348,7 +357,7 @@ async function leaguePayload(code, userId) {
       scoringMode: league.scoring_mode, limitValue: league.limit_value,
       createdAt: league.created_at,
     },
-    standings: standings.map((row) => ({ ...row, id: String(row.id) })),
+    standings: standings.map((row) => ({ ...row, id: String(row.id), avatarData: row.avatar_data || null })),
     recentMatches: recentMatches.map((row) => ({ ...row, id: row.id, winner_id: row.winner_id == null ? null : String(row.winner_id) })),
   };
 }
@@ -532,7 +541,7 @@ function publicRoom(room) {
     phase: room.phase,
     settings: room.settings,
     players: visiblePlayers.map((p) => ({
-      id: p.id, username: p.username, score: p.score,
+      id: p.id, username: p.username, avatarData: p.avatarData || null, score: p.score,
       correctAnswers: p.correctAnswers, reboundPoints: p.reboundPoints,
     })).sort((a, b) => {
       const ai = room.turnOrder.indexOf(a.id);
@@ -731,7 +740,7 @@ async function createRoomForUser(socket, payload) {
   }
   // Las reglas son propias de cada partida, también dentro de una liga.
   settings = validateMatchSettings(payload);
-  const { rows: userRows } = await pool.query('SELECT id, username FROM users WHERE id=$1', [userId]);
+  const { rows: userRows } = await pool.query('SELECT id, username, avatar_data FROM users WHERE id=$1', [userId]);
   if (!userRows.length) throw new Error('Tu perfil no existe. Cierra sesión y vuelve a entrar.');
   const matchId = crypto.randomUUID();
   let code = makeCode();
@@ -739,7 +748,7 @@ async function createRoomForUser(socket, payload) {
   const room = {
     id: matchId, code, mode, leagueId, leagueName, hostId: userId,
     settings, topic: settings.topic, phase: 'lobby',
-    players: [{ id: userId, username: userRows[0].username, score: 0, correctAnswers: 0, reboundPoints: 0, active: true, sockets: new Set([socket.id]) }],
+    players: [{ id: userId, username: userRows[0].username, avatarData: userRows[0].avatar_data || null, score: 0, correctAnswers: 0, reboundPoints: 0, active: true, sockets: new Set([socket.id]) }],
     bannedUserIds: new Set(),
     turnOrder: [userId], nextStarterIndex: 0, tieNextStarterIndex: 0,
     question: null, questionHistory: [], completedQuestions: 0,
@@ -774,10 +783,10 @@ async function addPlayerToRoom(socket, room) {
     const member = await assertLeagueMember(room.leagueId, userId);
     if (!member) throw new Error('Debes unirte a la liga antes de entrar en un duelo.');
   }
-  const { rows } = await pool.query('SELECT id, username FROM users WHERE id=$1', [userId]);
+  const { rows } = await pool.query('SELECT id, username, avatar_data FROM users WHERE id=$1', [userId]);
   if (!rows.length) throw new Error('No se encuentra tu perfil.');
   await pool.query('INSERT INTO match_players (match_id,user_id) VALUES ($1,$2)', [room.id, userId]);
-  room.players.push({ id: userId, username: rows[0].username, score: 0, correctAnswers: 0, reboundPoints: 0, active: true, sockets: new Set([socket.id]) });
+  room.players.push({ id: userId, username: rows[0].username, avatarData: rows[0].avatar_data || null, score: 0, correctAnswers: 0, reboundPoints: 0, active: true, sockets: new Set([socket.id]) });
   if (!room.turnOrder.includes(userId)) room.turnOrder.push(userId);
   socket.join(room.code);
   socket.data.roomCode = room.code;
