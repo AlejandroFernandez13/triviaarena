@@ -224,12 +224,22 @@ app.get('/api/me', requireAuth, async (req, res) => {
 });
 
 function validateLeagueSettings(body) {
+  // Una liga guarda sus miembros y su clasificación; la temática y las reglas
+  // se eligen de nuevo para cada duelo, no al crear la liga.
   const name = typeof body.name === 'string' ? body.name.trim() : '';
   if (name.length < 3 || name.length > 50) throw new Error('El nombre de la liga debe tener entre 3 y 50 caracteres.');
-  const scoringMode = body.scoringMode === 'questions' ? 'questions' : 'target';
-  const limitValue = scoringMode === 'questions' ? clampInt(body.limitValue, 3, 100, 15) : clampInt(body.limitValue, 1, 50, 5);
-  const topic = typeof body.topic === 'string' ? body.topic.trim().slice(0, 100) : 'Cultura general';
-  return { name, scoringMode, limitValue, topic: topic || 'Cultura general' };
+  return { name };
+}
+
+function validateMatchSettings(payload) {
+  const topic = typeof payload?.topic === 'string'
+    ? payload.topic.trim().slice(0, 100) || 'Cultura general'
+    : 'Cultura general';
+  const scoringMode = payload?.scoringMode === 'questions' ? 'questions' : 'target';
+  const limitValue = scoringMode === 'questions'
+    ? clampInt(payload?.limitValue, 3, 100, 15)
+    : clampInt(payload?.limitValue, 1, 50, 5);
+  return { topic, scoringMode, limitValue };
 }
 
 async function leaguePayload(code, userId) {
@@ -293,10 +303,12 @@ app.post('/api/leagues', requireAuth, async (req, res) => {
     for (let i = 0; i < 5; i += 1) {
       const code = makeCode();
       try {
+        // topic/scoring_mode/limit_value son columnas heredadas. Sus valores
+        // por defecto se conservan por compatibilidad, pero ya no gobiernan la liga.
         const result = await pool.query(`
-          INSERT INTO leagues (name, code, created_by, topic, scoring_mode, limit_value)
-          VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, code
-        `, [settings.name, code, userId, settings.topic, settings.scoringMode, settings.limitValue]);
+          INSERT INTO leagues (name, code, created_by)
+          VALUES ($1,$2,$3) RETURNING id, code
+        `, [settings.name, code, userId]);
         created = result.rows[0];
         break;
       } catch (error) { if (error.code !== '23505') throw error; }
@@ -443,21 +455,9 @@ async function createRoomForUser(socket, payload) {
     const league = await assertLeagueMember(leagueId, userId);
     if (!league) throw new Error('Debes pertenecer a esa liga para crear un duelo.');
     leagueName = league.name;
-    settings = {
-      topic: league.topic,
-      scoringMode: league.scoring_mode,
-      limitValue: Number(league.limit_value),
-    };
-  } else {
-    const scoringMode = payload?.scoringMode === 'questions' ? 'questions' : 'target';
-    settings = {
-      topic: typeof payload?.topic === 'string' ? payload.topic.trim().slice(0, 100) || 'Cultura general' : 'Cultura general',
-      scoringMode,
-      limitValue: scoringMode === 'questions'
-        ? clampInt(payload?.limitValue, 3, 100, 15)
-        : clampInt(payload?.limitValue, 1, 50, 5),
-    };
   }
+  // Las reglas son propias de cada partida, también dentro de una liga.
+  settings = validateMatchSettings(payload);
   const { rows: userRows } = await pool.query('SELECT id, username FROM users WHERE id=$1', [userId]);
   if (!userRows.length) throw new Error('Tu perfil no existe. Cierra sesión y vuelve a entrar.');
   const matchId = crypto.randomUUID();
@@ -602,8 +602,9 @@ async function startRound(room, isTieBreaker = false) {
   try {
     const q = await generateQuestion(room.topic, room.questionHistory);
     room.question = q;
-    room.questionHistory.push(q.question);
-    if (room.questionHistory.length > 25) room.questionHistory.shift();
+    // Guardar toda la partida (incluida la solución internamente) para evitar repeticiones.
+    // Esta historia solo se usa en el servidor y no se envía a los jugadores.
+    room.questionHistory.push({ question: q.question, answer: q.answer, topic: q.topic || room.topic });
     room.phase = isTieBreaker ? 'tiebreak' : 'playing';
     room.currentTurnUserId = room.attemptOrder[0];
     publishRoom(room);

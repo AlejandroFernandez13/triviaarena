@@ -187,10 +187,7 @@ function leagueTemplate() {
       <section class="panel"><div class="eyebrow">Nueva competición</div><h2>Crea una liga</h2><p class="muted small">La liga tendrá un código propio, una tabla persistente y duelos 1 contra 1. Cada victoria suma 3 puntos.</p>
         <form id="create-league-form">
           <div class="field-block"><label class="field-label" for="league-name">Nombre de la liga</label><input class="field" id="league-name" name="name" maxlength="50" minlength="3" placeholder="Ej. La Liga del Viernes" required></div>
-          <div class="field-block"><label class="field-label" for="league-topic">Temática</label><select class="field" id="league-topic" name="topic"><option>Cultura general</option><option>Ciencia</option><option>Matemáticas</option><option>Historia</option><option>Geografía</option><option>Astronomía</option><option>Tecnología e informática</option><option>Naturaleza y animales</option><option>Arte y literatura</option><option>Cine y series</option><option>Música</option><option>Deportes</option><option>Lengua</option><option>Mitología</option><option>Videojuegos</option><option>Gastronomía</option><option>Filosofía</option><option>Aleatorio</option><option>Cualquier tema</option><option>Tema personalizado</option></select></div>
-          <div id="league-custom-topic-wrap" class="field-block hidden"><label class="field-label" for="league-custom-topic">Tema personalizado</label><input class="field" id="league-custom-topic" name="customTopic" maxlength="100" placeholder="Ej. cine, biología, geografía…"></div>
-          <div class="field-block"><label class="field-label">Reglas para los duelos</label><div class="choice-row"><label class="choice-card"><input type="radio" name="scoringMode" value="target" checked><span><b class="choice-title">Puntos</b><small class="choice-desc">Llegar a una puntuación.</small></span></label><label class="choice-card"><input type="radio" name="scoringMode" value="questions"><span><b class="choice-title">Preguntas</b><small class="choice-desc">Acabar un número fijo.</small></span></label></div></div>
-          <div class="field-block"><label class="field-label" for="league-limit" id="league-limit-label">Puntos para ganar</label><input class="field" type="number" id="league-limit" name="limitValue" min="1" max="50" value="5" required></div>
+          <div class="notice" style="margin:16px 0">La liga guarda la clasificación y el historial. Elegirás la temática y las reglas cada vez que crees un nuevo duelo, así podréis variar de partida en partida.</div>
           <div class="form-error" id="create-league-error"></div><button class="btn btn-primary btn-block" type="submit">Crear liga ↗</button>
         </form>
       </section>
@@ -294,9 +291,18 @@ function leagueDetailTemplate() {
         ${data.standings.length ? `<div class="table-wrap"><table class="standings"><thead><tr><th>#</th><th>Jugador</th><th>J</th><th>V</th><th>D</th><th>Pts</th></tr></thead><tbody>${data.standings.map((p, index) => `<tr><td><span class="rank-badge ${index === 0 ? 'first' : ''}">${index + 1}</span></td><td><strong>${esc(p.username)}${p.id === state.me?.id ? ' (tú)' : ''}</strong></td><td>${number(p.played)}</td><td>${number(p.wins)}</td><td>${number(p.losses)}</td><td style="color:${index === 0 ? 'var(--lime)' : 'var(--text)'};font-weight:800">${number(p.points)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-state">Todavía no hay jugadores en la clasificación.</div>'}
         <div class="separator"></div><div class="space-between"><div><div class="small muted">Código para invitar</div><div class="mono" style="color:var(--lime);margin-top:5px">${esc(league.code)}</div></div><button class="btn btn-ghost btn-small" data-action="copy-league-code">Copiar código ⧉</button></div>
       </section>
-      <section class="panel"><div class="eyebrow">Duelo 1 contra 1</div><h2>Desafía a un jugador</h2><p class="muted small">Crea una sala y comparte el código con alguien de esta liga. Cuando el rival entre, el anfitrión empieza el duelo.</p>
-        <div class="notice" style="margin:15px 0 19px">Tema: <strong>${esc(league.topic)}</strong><br>Formato: <strong>${league.scoringMode === 'questions' ? `${league.limitValue} preguntas` : `${league.limitValue} puntos`}</strong></div>
-        <button class="btn btn-primary btn-block" data-action="create-league-duel" data-league-id="${esc(league.id)}">Crear duelo de esta liga ↗</button>
+      <section class="panel"><div class="eyebrow">Duelo 1 contra 1</div><h2>Desafía a un jugador</h2><p class="muted small">Cada enfrentamiento puede tener una temática y unas reglas diferentes. Configura este duelo y comparte el código con alguien de la liga.</p>
+        <form id="create-league-duel-form" data-league-id="${esc(league.id)}">
+          <div class="field-block"><label class="field-label">Temática para este duelo</label><div class="topic-grid">${topicOptions()}</div></div>
+          <div id="league-duel-custom-topic-wrap" class="field-block hidden"><label class="field-label" for="league-duel-custom-topic">Tema personalizado</label><input class="field" id="league-duel-custom-topic" name="customTopic" maxlength="100" placeholder="Ej. Marvel, astronomía, cine clásico…"></div>
+          <div class="subsection"><label class="field-label">Condición de victoria</label><div class="choice-row">
+            <label class="choice-card"><input type="radio" name="scoringMode" value="target" checked><span><b class="choice-title">Llegar a puntos</b><small class="choice-desc">Gana quien alcance primero la puntuación elegida.</small></span></label>
+            <label class="choice-card"><input type="radio" name="scoringMode" value="questions"><span><b class="choice-title">Número de preguntas</b><small class="choice-desc">Gana quien tenga más puntos al terminar el total.</small></span></label>
+          </div>
+          <div class="field-block"><label class="field-label" for="league-duel-limit" id="league-duel-limit-label">Puntos necesarios para ganar</label><input class="field" type="number" id="league-duel-limit" name="limitValue" min="1" max="50" value="5" required></div></div>
+          <div class="notice" style="margin:16px 0">Cada victoria suma 3 puntos a la clasificación de esta liga. La configuración solo se aplica a este duelo.</div>
+          <div class="form-error" id="create-league-duel-error"></div><button class="btn btn-primary btn-block" type="submit">Crear duelo y recibir código ↗</button>
+        </form>
         <div class="subsection"><label class="field-label" for="duel-code">¿Te han pasado un código de duelo?</label><form id="join-duel-form"><div class="inline-form"><input class="field code-input" id="duel-code" name="code" maxlength="8" placeholder="CÓDIGO" required><button class="btn btn-secondary" type="submit">Entrar</button></div><div class="form-error" id="join-duel-error"></div></form></div>
       </section>
     </div>
@@ -316,7 +322,7 @@ function render() {
   else if (state.view === 'result') app.innerHTML = resultTemplate();
   else app.innerHTML = loadingRoomTemplate();
   if (state.view === 'quick') updateQuickTopicVisibility();
-  if (state.view === 'leagues') updateLeagueTopicVisibility();
+  if (state.view === 'league-detail') updateLeagueDuelSettings();
 }
 function showFormError(id, message) {
   const element = document.getElementById(id);
@@ -342,17 +348,18 @@ function updateQuickTopicVisibility() {
     if ((scoringMode === 'questions' && Number(input.value) < 3) || (scoringMode === 'target' && Number(input.value) > 50)) input.value = desired;
   }
 }
-function updateLeagueTopicVisibility() {
-  const chosen = document.getElementById('league-topic')?.value;
-  document.getElementById('league-custom-topic-wrap')?.classList.toggle('hidden', chosen !== 'Tema personalizado');
-  const scoringMode = app.querySelector('input[name="scoringMode"]:checked')?.value || 'target';
-  const label = document.getElementById('league-limit-label');
-  const input = document.getElementById('league-limit');
+function updateLeagueDuelSettings() {
+  const chosen = app.querySelector('#create-league-duel-form input[name="topicChoice"]:checked')?.value;
+  document.getElementById('league-duel-custom-topic-wrap')?.classList.toggle('hidden', chosen !== 'Tema personalizado');
+  const scoringMode = app.querySelector('#create-league-duel-form input[name="scoringMode"]:checked')?.value || 'target';
+  const label = document.getElementById('league-duel-limit-label');
+  const input = document.getElementById('league-duel-limit');
   if (label && input) {
-    label.textContent = scoringMode === 'questions' ? 'Número de preguntas' : 'Puntos para ganar';
+    label.textContent = scoringMode === 'questions' ? 'Número total de preguntas' : 'Puntos necesarios para ganar';
     input.min = scoringMode === 'questions' ? '3' : '1';
     input.max = scoringMode === 'questions' ? '100' : '50';
-    if ((scoringMode === 'questions' && Number(input.value) < 3) || (scoringMode === 'target' && Number(input.value) > 50)) input.value = scoringMode === 'questions' ? 15 : 5;
+    const desired = scoringMode === 'questions' ? 15 : 5;
+    if ((scoringMode === 'questions' && Number(input.value) < 3) || (scoringMode === 'target' && Number(input.value) > 50)) input.value = desired;
   }
 }
 function connectSocket() {
@@ -508,10 +515,6 @@ app.addEventListener('click', async (event) => {
     socket?.emit('start-room', {}, (result) => { if (!result?.ok) toast(result?.error || 'No se pudo iniciar la partida.'); });
   }
   else if (action === 'leave-room') await backHome();
-  else if (action === 'create-league-duel') {
-    if (!state.activeLeague) return;
-    emitCreateRoom({ mode: 'league', leagueId: button.dataset.leagueId });
-  }
   else if (action === 'rematch') {
     const room = state.room;
     if (!room) { state.view = 'quick'; render(); return; }
@@ -535,7 +538,7 @@ app.addEventListener('click', async (event) => {
 
 app.addEventListener('change', (event) => {
   if (state.view === 'quick' && (event.target.name === 'topicChoice' || event.target.name === 'scoringMode')) updateQuickTopicVisibility();
-  if (state.view === 'leagues' && (event.target.id === 'league-topic' || event.target.name === 'scoringMode')) updateLeagueTopicVisibility();
+  if (state.view === 'league-detail' && (event.target.name === 'topicChoice' || event.target.name === 'scoringMode')) updateLeagueDuelSettings();
 });
 app.addEventListener('input', (event) => {
   if (event.target.id === 'answer-input') state.answerDraft = event.target.value;
@@ -581,21 +584,26 @@ app.addEventListener('submit', async (event) => {
   }
   else if (form.id === 'create-league-form') {
     const values = new FormData(form);
-    const selectedTopic = String(values.get('topic') || 'Cultura general');
-    const topic = selectedTopic === 'Tema personalizado' ? String(values.get('customTopic') || '').trim() : selectedTopic;
-    const scoringMode = String(values.get('scoringMode') || 'target');
-    const limitValue = Number(values.get('limitValue'));
-    if (!topic) { showFormError('create-league-error', 'Escribe el tema personalizado.'); return; }
-    if (!Number.isInteger(limitValue) || limitValue < (scoringMode === 'questions' ? 3 : 1) || limitValue > (scoringMode === 'questions' ? 100 : 50)) {
-      showFormError('create-league-error', scoringMode === 'questions' ? 'Elige entre 3 y 100 preguntas.' : 'Elige entre 1 y 50 puntos.'); return;
-    }
     try {
-      const data = await api('/api/leagues', { method: 'POST', body: JSON.stringify({ name: values.get('name'), topic, scoringMode, limitValue }) });
+      const data = await api('/api/leagues', { method: 'POST', body: JSON.stringify({ name: values.get('name') }) });
       state.activeLeague = data;
       await refreshMyLeagues();
       state.view = 'league-detail'; render();
       toast(`Liga creada. Comparte el código ${data.league.code}.`);
     } catch (error) { showFormError('create-league-error', error.message); }
+  }
+  else if (form.id === 'create-league-duel-form') {
+    const values = new FormData(form);
+    const selectedTopic = String(values.get('topicChoice') || 'Cultura general');
+    const topic = selectedTopic === 'Tema personalizado' ? String(values.get('customTopic') || '').trim() : selectedTopic;
+    const scoringMode = String(values.get('scoringMode') || 'target');
+    const limitValue = Number(values.get('limitValue'));
+    if (!topic) { showFormError('create-league-duel-error', 'Escribe el tema personalizado para este duelo.'); return; }
+    if (!Number.isInteger(limitValue) || limitValue < (scoringMode === 'questions' ? 3 : 1) || limitValue > (scoringMode === 'questions' ? 100 : 50)) {
+      showFormError('create-league-duel-error', scoringMode === 'questions' ? 'Elige entre 3 y 100 preguntas.' : 'Elige entre 1 y 50 puntos.'); return;
+    }
+    if (!state.config.aiEnabled && selectedTopic === 'Tema personalizado') toast('Sin IA, el tema personalizado usará preguntas de respaldo cuando sea posible.');
+    emitCreateRoom({ mode: 'league', leagueId: form.dataset.leagueId, topic, scoringMode, limitValue });
   }
   else if (form.id === 'join-league-form') {
     const values = new FormData(form);
