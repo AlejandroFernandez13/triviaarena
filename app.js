@@ -27,7 +27,20 @@ function topicEmoji(topic) {
   if (value.includes('cien')) return '⚛';
   if (value.includes('mate')) return '∑';
   if (value.includes('hist')) return '⌛';
-  if (value.includes('aleat')) return '✳';
+  if (value.includes('geograf')) return '🌍';
+  if (value.includes('astronom')) return '🪐';
+  if (value.includes('tecnolog') || value.includes('inform')) return '💻';
+  if (value.includes('naturaleza') || value.includes('animal')) return '🐾';
+  if (value.includes('arte') || value.includes('literatura')) return '🎨';
+  if (value.includes('cine') || value.includes('serie')) return '🎬';
+  if (value.includes('música') || value.includes('musica')) return '🎵';
+  if (value.includes('deporte')) return '🏆';
+  if (value.includes('lengua')) return '🔤';
+  if (value.includes('mitolog')) return '⚡';
+  if (value.includes('videojuego')) return '🎮';
+  if (value.includes('gastronom')) return '🍲';
+  if (value.includes('filosof')) return '💭';
+  if (value.includes('aleat') || value.includes('cualquier')) return '✳';
   if (value.includes('cultura')) return '✦';
   return '◎';
 }
@@ -127,12 +140,14 @@ function dashboardTemplate() {
 function itemsCount(items) { return (items || []).length; }
 function topicOptions(selected = 'Cultura general') {
   const options = [
-    ['Cultura general', '✦', 'Cultura general'], ['Ciencia', '⚛', 'Ciencia'],
-    ['Matemáticas', '∑', 'Matemáticas'], ['Historia', '⌛', 'Historia'],
-    ['Aleatorio', '✳', 'Aleatorio'], ['Cualquier tema', '◎', 'Cualquier tema'],
-    ['Tema personalizado', '✎', 'Tema personalizado'],
+    ['Cultura general', '✦'], ['Ciencia', '⚛'], ['Matemáticas', '∑'], ['Historia', '⌛'],
+    ['Geografía', '🌍'], ['Astronomía', '🪐'], ['Tecnología e informática', '💻'],
+    ['Naturaleza y animales', '🐾'], ['Arte y literatura', '🎨'], ['Cine y series', '🎬'],
+    ['Música', '🎵'], ['Deportes', '🏆'], ['Lengua', '🔤'], ['Mitología', '⚡'],
+    ['Videojuegos', '🎮'], ['Gastronomía', '🍲'], ['Filosofía', '💭'],
+    ['Aleatorio', '✳'], ['Cualquier tema', '◎'], ['Tema personalizado', '✎'],
   ];
-  return options.map(([value, emoji, label]) => `<label class="topic-option"><input type="radio" name="topicChoice" value="${esc(value)}" ${value === selected ? 'checked' : ''}><span><i>${emoji}</i>${esc(label)}</span></label>`).join('');
+  return options.map(([value, emoji]) => `<label class="topic-option"><input type="radio" name="topicChoice" value="${esc(value)}" ${value === selected ? 'checked' : ''}><span><i>${emoji}</i>${esc(value)}</span></label>`).join('');
 }
 function quickTemplate() {
   return `
@@ -172,7 +187,7 @@ function leagueTemplate() {
       <section class="panel"><div class="eyebrow">Nueva competición</div><h2>Crea una liga</h2><p class="muted small">La liga tendrá un código propio, una tabla persistente y duelos 1 contra 1. Cada victoria suma 3 puntos.</p>
         <form id="create-league-form">
           <div class="field-block"><label class="field-label" for="league-name">Nombre de la liga</label><input class="field" id="league-name" name="name" maxlength="50" minlength="3" placeholder="Ej. La Liga del Viernes" required></div>
-          <div class="field-block"><label class="field-label" for="league-topic">Temática</label><select class="field" id="league-topic" name="topic"><option>Cultura general</option><option>Ciencia</option><option>Matemáticas</option><option>Historia</option><option>Aleatorio</option><option>Cualquier tema</option><option>Tema personalizado</option></select></div>
+          <div class="field-block"><label class="field-label" for="league-topic">Temática</label><select class="field" id="league-topic" name="topic"><option>Cultura general</option><option>Ciencia</option><option>Matemáticas</option><option>Historia</option><option>Geografía</option><option>Astronomía</option><option>Tecnología e informática</option><option>Naturaleza y animales</option><option>Arte y literatura</option><option>Cine y series</option><option>Música</option><option>Deportes</option><option>Lengua</option><option>Mitología</option><option>Videojuegos</option><option>Gastronomía</option><option>Filosofía</option><option>Aleatorio</option><option>Cualquier tema</option><option>Tema personalizado</option></select></div>
           <div id="league-custom-topic-wrap" class="field-block hidden"><label class="field-label" for="league-custom-topic">Tema personalizado</label><input class="field" id="league-custom-topic" name="customTopic" maxlength="100" placeholder="Ej. cine, biología, geografía…"></div>
           <div class="field-block"><label class="field-label">Reglas para los duelos</label><div class="choice-row"><label class="choice-card"><input type="radio" name="scoringMode" value="target" checked><span><b class="choice-title">Puntos</b><small class="choice-desc">Llegar a una puntuación.</small></span></label><label class="choice-card"><input type="radio" name="scoringMode" value="questions"><span><b class="choice-title">Preguntas</b><small class="choice-desc">Acabar un número fijo.</small></span></label></div></div>
           <div class="field-block"><label class="field-label" for="league-limit" id="league-limit-label">Puntos para ganar</label><input class="field" type="number" id="league-limit" name="limitValue" min="1" max="50" value="5" required></div>
