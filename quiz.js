@@ -6,11 +6,29 @@ const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 const model = process.env.OPENAI_MODEL || 'gpt-5.5';
+const RANDOM_TOPIC_LABELS = new Set(['aleatorio', 'cualquier tema', 'random', 'any topic']);
+const META_TOPICS = new Set(['aleatorio', 'cualquier tema', 'tema personalizado']);
 
 export const isAiEnabled = Boolean(openai);
 
 function pickRandom(items) {
   return items[Math.floor(Math.random() * items.length)];
+}
+
+function resolveTopic(topic) {
+  const requested = String(topic || 'Cultura general').trim() || 'Cultura general';
+  if (RANDOM_TOPIC_LABELS.has(requested.toLocaleLowerCase('es'))) {
+    const available = TOPICS.filter((item) => !META_TOPICS.has(item.toLocaleLowerCase('es')));
+    return pickRandom(available);
+  }
+  return requested;
+}
+
+function historyQuestion(entry) {
+  return typeof entry === 'string' ? entry : String(entry?.question || '');
+}
+function historyAnswer(entry) {
+  return typeof entry === 'string' ? '' : String(entry?.answer || '');
 }
 
 function normalizeAnswer(value = '') {
@@ -67,27 +85,49 @@ function localGrade(question, submittedAnswer) {
   return { correct: false, feedback: 'La respuesta no coincide con la solución aceptada.' };
 }
 
+function questionWasAsked(questionText, recentQuestionTexts = []) {
+  const normalized = normalizeAnswer(questionText);
+  if (!normalized) return true;
+  const tokens = (value) => new Set(normalizeAnswer(value).split(' ').filter((word) => word.length > 2 && ![
+    'que', 'cual', 'cuales', 'como', 'donde', 'cuando', 'quien', 'quienes', 'para', 'entre', 'sobre', 'este', 'esta', 'estos', 'estas', 'desde', 'segun', 'principalmente', 'llama', 'nombre', 'tipo', 'ocurrio', 'ocurre', 'asocia', 'caracteristica',
+  ].includes(word)));
+  const candidateTokens = tokens(normalized);
+  return recentQuestionTexts.some((entry) => {
+    const previous = normalizeAnswer(historyQuestion(entry));
+    if (!previous) return false;
+    if (previous === normalized) return true;
+    // Reject near-identical paraphrases without banning unrelated questions that share a common answer.
+    const previousTokens = tokens(previous);
+    const shared = [...candidateTokens].filter((word) => previousTokens.has(word)).length;
+    const union = new Set([...candidateTokens, ...previousTokens]).size || 1;
+    const jaccard = shared / union;
+    if (Math.min(candidateTokens.size, previousTokens.size) >= 4 && jaccard >= 0.82) return true;
+    if (Math.min(normalized.length, previous.length) >= 28) {
+      const distance = levenshtein(normalized, previous);
+      const similarity = 1 - distance / Math.max(normalized.length, previous.length);
+      if (similarity >= 0.88) return true;
+    }
+    return false;
+  });
+}
+
 function bankQuestion(topic, recentQuestionTexts = []) {
-  const requested = (topic || 'Cultura general').trim();
-  let effectiveTopic = requested;
-  if (requested.toLowerCase() === 'aleatorio' || requested.toLowerCase() === 'cualquier tema') {
-    effectiveTopic = pickRandom(TOPICS.filter((t) => t !== 'Aleatorio'));
-  }
+  const effectiveTopic = resolveTopic(topic);
+  const recent = new Set(recentQuestionTexts.map((entry) => normalizeAnswer(historyQuestion(entry))));
+  let candidates = QUESTION_BANK.filter((q) => q.topic.toLocaleLowerCase('es') === effectiveTopic.toLocaleLowerCase('es'));
 
-  const recent = new Set(recentQuestionTexts.map((q) => normalizeAnswer(q)));
-  let candidates = QUESTION_BANK.filter((q) => q.topic.toLowerCase() === effectiveTopic.toLowerCase());
-
-  // En un tema libre sin IA, intentar encontrar preguntas que contengan el tema;
-  // si no hay coincidencias, usar cultura general como respaldo honesto y jugable.
-  if (!candidates.length && !TOPICS.some((t) => t.toLowerCase() === effectiveTopic.toLowerCase())) {
+  // Para temas personalizados sin IA, busca palabras relevantes en tema, pregunta y solución.
+  if (!candidates.length && !TOPICS.some((t) => t.toLocaleLowerCase('es') === effectiveTopic.toLocaleLowerCase('es'))) {
     const words = normalizeAnswer(effectiveTopic).split(' ').filter((word) => word.length >= 4);
     candidates = QUESTION_BANK.filter((q) => words.some((word) =>
       normalizeAnswer(`${q.topic} ${q.question} ${q.answer}`).includes(word)));
   }
   if (!candidates.length) candidates = QUESTION_BANK.filter((q) => q.topic === 'Cultura general');
+
+  // No repetir ninguna pregunta del banco hasta agotar las disponibles para ese tema.
   const fresh = candidates.filter((q) => !recent.has(normalizeAnswer(q.question)));
   const selected = pickRandom(fresh.length ? fresh : candidates);
-  return { ...selected, topic: selected.topic, source: 'bank' };
+  return { ...selected, source: 'bank' };
 }
 
 function safeJson(text) {
@@ -95,45 +135,73 @@ function safeJson(text) {
   return JSON.parse(cleaned);
 }
 
+function recentContext(history, extraRejected = []) {
+  return [
+    ...history.slice(-120).map((entry) => ({
+      pregunta: historyQuestion(entry),
+      ...(historyAnswer(entry) ? { respuesta: historyAnswer(entry) } : {}),
+      ...(typeof entry === 'object' && entry?.topic ? { tema: entry.topic } : {}),
+    })),
+    ...extraRejected.map((question) => ({ pregunta_rechazada_por_repetida: question })),
+  ];
+}
+
+async function askAIForQuestion(topic, history, rejectedQuestions) {
+  const response = await openai.responses.create({
+    model,
+    instructions: [
+      'Eres el generador de preguntas de un juego competitivo de conocimiento en español.',
+      'Crea exactamente una pregunta clara, verificable y con una respuesta factual estable.',
+      'Respeta estrictamente la temática solicitada. Si el tema es una asignatura concreta, no te desvíes a cultura general.',
+      'Evita política y noticias recientes salvo petición expresa. No hagas preguntas ambiguas ni de opinión, y no reveles la respuesta en el enunciado.',
+      'Incluye una respuesta canónica, entre 3 y 8 variantes o alias válidos cuando existan y una explicación breve.',
+      'MUY IMPORTANTE: no repitas ninguna pregunta de la lista de preguntas recientes y no reformules la misma pregunta factual. Cambia el hecho concreto que se evalúa; no basta con cambiar unas pocas palabras.',
+      'Si no encuentras una pregunta distinta, elige otro subtema dentro de la temática en lugar de repetir.',
+      'Devuelve solamente un objeto JSON con las claves: question, answer, acceptedAnswers (array de strings), explanation, topic.',
+    ].join(' '),
+    input: JSON.stringify({
+      tema_solicitado: topic,
+      preguntas_y_respuestas_recientes_a_evitar: recentContext(history, rejectedQuestions),
+    }),
+    text: { format: { type: 'json_object' } },
+  });
+  const parsed = safeJson(response.output_text);
+  if (
+    typeof parsed.question !== 'string' || parsed.question.trim().length <= 8 ||
+    typeof parsed.answer !== 'string' || !parsed.answer.trim() ||
+    !Array.isArray(parsed.acceptedAnswers)
+  ) throw new Error('La respuesta de la IA no tenía el formato esperado.');
+
+  return {
+    question: parsed.question.trim(),
+    answer: parsed.answer.trim(),
+    acceptedAnswers: parsed.acceptedAnswers.filter((x) => typeof x === 'string').slice(0, 12),
+    explanation: typeof parsed.explanation === 'string' ? parsed.explanation.trim() : '',
+    topic: typeof parsed.topic === 'string' && parsed.topic.trim() ? parsed.topic.trim() : topic,
+    source: 'ai',
+  };
+}
+
 export async function generateQuestion(topic, recentQuestionTexts = []) {
+  const effectiveTopic = resolveTopic(topic);
   if (openai) {
-    try {
-      const response = await openai.responses.create({
-        model,
-        instructions: [
-          'Eres el generador de preguntas de un juego competitivo de conocimiento en español.',
-          'Crea exactamente una pregunta clara, verificable y con una respuesta factual estable. Evita política y noticias recientes salvo petición expresa.',
-          'No hagas preguntas ambiguas ni de opinión, y no reveles la respuesta dentro del enunciado.',
-          'Incluye una respuesta canónica, entre 3 y 8 variantes o alias válidos cuando existan, y una explicación breve.',
-          'Devuelve solamente un objeto JSON con las claves: question, answer, acceptedAnswers (array de strings), explanation, topic.',
-        ].join(' '),
-        input: JSON.stringify({
-          tema_solicitado: topic || 'Cultura general',
-          preguntas_recientes_a_evitar: recentQuestionTexts.slice(-8),
-        }),
-        text: { format: { type: 'json_object' } },
-      });
-      const parsed = safeJson(response.output_text);
-      if (
-        typeof parsed.question === 'string' && parsed.question.length > 8 &&
-        typeof parsed.answer === 'string' && parsed.answer.length > 0 &&
-        Array.isArray(parsed.acceptedAnswers)
-      ) {
-        return {
-          question: parsed.question.trim(),
-          answer: parsed.answer.trim(),
-          acceptedAnswers: parsed.acceptedAnswers.filter((x) => typeof x === 'string').slice(0, 12),
-          explanation: typeof parsed.explanation === 'string' ? parsed.explanation.trim() : '',
-          topic: typeof parsed.topic === 'string' && parsed.topic.trim() ? parsed.topic.trim() : topic,
-          source: 'ai',
-        };
+    const rejectedQuestions = [];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const parsed = await askAIForQuestion(effectiveTopic, recentQuestionTexts, rejectedQuestions);
+        if (!questionWasAsked(parsed.question, [...recentQuestionTexts, ...rejectedQuestions])) return parsed;
+        rejectedQuestions.push(parsed.question);
+        console.warn('La IA propuso una pregunta repetida; se solicita otra.');
+      } catch (error) {
+        console.error('Falló la generación de pregunta por IA; se usa el banco local:', error.message);
+        break;
       }
-      throw new Error('La respuesta de la IA no tenía el formato esperado.');
-    } catch (error) {
-      console.error('Falló la generación de pregunta por IA; se usa el banco local:', error.message);
+    }
+    if (rejectedQuestions.length) {
+      console.warn('La IA no consiguió proponer una pregunta nueva; se usa una pregunta inédita del banco local cuando quede disponible.');
     }
   }
-  return bankQuestion(topic, recentQuestionTexts);
+  return bankQuestion(effectiveTopic, recentQuestionTexts);
 }
 
 export async function gradeAnswer(question, submittedAnswer) {

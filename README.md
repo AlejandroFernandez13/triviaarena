@@ -11,12 +11,12 @@ No subas el ZIP como único archivo: descárgalo, descomprímelo en tu ordenador
 ## Qué incluye
 
 - Registro e inicio de sesión; contraseñas cifradas y perfil persistente.
-- Partidas rápidas online, código para unirse, tema, puntuación objetivo o número de preguntas configurable.
-- Respuestas escritas y rebote de la misma pregunta si alguien falla.
+- Partidas rápidas online, código para unirse, 17 temáticas seleccionables, puntuación objetivo o número de preguntas configurable.
+- Respuestas escritas y rebote de la misma pregunta si alguien falla. El servidor conserva todo el historial de la partida y pide a la IA que evite repetir tanto preguntas como el hecho que evalúan.
 - Desempate entre los jugadores empatados.
 - Ligas privadas 1 contra 1 y tabla de clasificación persistente.
 - Estadísticas e historial guardados en PostgreSQL.
-- Preguntas nuevas y evaluación semántica mediante OpenAI si configuras `OPENAI_API_KEY`; banco local para probar sin esa clave.
+- Preguntas nuevas y evaluación semántica mediante OpenAI si configuras `OPENAI_API_KEY`; banco local de unas 300 preguntas repartidas en 17 temáticas para probar sin esa clave.
 
 ## Desplegar en Render
 
@@ -58,6 +58,51 @@ app.js
 ## Limitaciones conocidas
 
 - Las salas de partida activas se guardan en la memoria del servidor y se pierden si Render reinicia o despliega la aplicación. Las partidas terminadas sí quedan registradas en PostgreSQL.
-- Sin `OPENAI_API_KEY`, se utiliza un banco de preguntas limitado y una comparación local de respuestas; no puede cubrir cualquier tema personalizado.
+- Sin `OPENAI_API_KEY`, se utiliza un banco local de unas 300 preguntas en 17 temáticas y una comparación local de respuestas. Los temas personalizados no garantizan una cobertura amplia sin la IA.
 - Antes de confiar en los datos a largo plazo, revisa las condiciones y la caducidad del plan de PostgreSQL que elijas en Render.
 - Esta versión todavía debe probarse en una cuenta real de Render y con la base de datos conectada.
+
+
+## Versión 1.2.0 — ampliación del banco de preguntas
+
+El banco de respaldo contiene ahora **2.990 preguntas** distribuidas de forma proporcional en las 17 categorías del juego, diez veces el número de preguntas de cada categoría de la versión 1.1. La selección para una partida excluye preguntas ya utilizadas en esa sala y la generación con IA rechaza también preguntas con enunciados casi idénticos.
+
+El banco local permite jugar aunque la API de IA no esté configurada. Cuando la IA está habilitada, sus preguntas siguen generándose dinámicamente; el banco ampliado funciona como respaldo y como fuente de nuevas preguntas cuando la generación falla o propone una repetida.
+
+Nota: se ha automatizado la revisión de sintaxis, recuento por tema y duplicados de enunciado normalizado. Como en cualquier banco de conocimiento amplio, conviene revisar preguntas y respuestas sugeridas por la IA o por datos categóricos antes de utilizarlo en torneos formales.
+
+
+## Versión 1.2.0 — ampliación del banco de preguntas
+
+El banco de respaldo contiene ahora **2.990 preguntas** distribuidas de forma proporcional en las 17 categorías del juego, diez veces el número de preguntas de cada categoría de la versión 1.1. La selección para una partida excluye preguntas ya utilizadas en esa sala y la generación con IA rechaza también preguntas con enunciados casi idénticos.
+
+El banco local permite jugar aunque la API de IA no esté configurada. Cuando la IA está habilitada, sus preguntas siguen generándose dinámicamente; el banco ampliado funciona como respaldo y como fuente de nuevas preguntas cuando la generación falla o propone una repetida.
+
+Nota: se ha automatizado la revisión de sintaxis, recuento por tema y duplicados de enunciado normalizado. Como en cualquier banco de conocimiento amplio, conviene revisar preguntas y respuestas sugeridas por la IA o por datos categóricos antes de utilizarlo en torneos formales.
+
+
+## Versión 1.2.0 — ampliación del banco de preguntas
+
+El banco de respaldo contiene ahora **2.990 preguntas** distribuidas de forma proporcional en las 17 categorías del juego, diez veces el número de preguntas de cada categoría de la versión 1.1. La selección para una partida excluye preguntas ya utilizadas en esa sala y la generación con IA rechaza también preguntas con enunciados casi idénticos.
+
+El banco local permite jugar aunque la API de IA no esté configurada. Cuando la IA está habilitada, sus preguntas siguen generándose dinámicamente; el banco ampliado funciona como respaldo y como fuente de nuevas preguntas cuando la generación falla o propone una repetida.
+
+Nota: se ha automatizado la revisión de sintaxis, recuento por tema y duplicados de enunciado normalizado. Como en cualquier banco de conocimiento amplio, conviene revisar preguntas y respuestas sugeridas por la IA o por datos categóricos antes de utilizarlo en torneos formales.
+
+
+## Versión 1.2.0 — ampliación del banco de preguntas
+
+El banco de respaldo contiene ahora **2.990 preguntas** distribuidas de forma proporcional en las 17 categorías del juego, diez veces el número de preguntas de cada categoría de la versión 1.1. La selección para una partida excluye preguntas ya utilizadas en esa sala y la generación con IA rechaza también preguntas con enunciados casi idénticos.
+
+El banco local permite jugar aunque la API de IA no esté configurada. Cuando la IA está habilitada, sus preguntas siguen generándose dinámicamente; el banco ampliado funciona como respaldo y como fuente de nuevas preguntas cuando la generación falla o propone una repetida.
+
+Nota: se ha automatizado la revisión de sintaxis, recuento por tema y duplicados de enunciado normalizado. Como en cualquier banco de conocimiento amplio, conviene revisar preguntas y respuestas sugeridas por la IA o por datos categóricos antes de utilizarlo en torneos formales.
+
+
+## Versión 1.2.0 — ampliación del banco de preguntas
+
+El banco de respaldo contiene ahora **2.990 preguntas** distribuidas de forma proporcional en las 17 categorías del juego, diez veces el número de preguntas de cada categoría de la versión 1.1. La selección para una partida excluye preguntas ya utilizadas en esa sala y la generación con IA rechaza también preguntas con enunciados casi idénticos.
+
+El banco local permite jugar aunque la API de IA no esté configurada. Cuando la IA está habilitada, sus preguntas siguen generándose dinámicamente; el banco ampliado funciona como respaldo y como fuente de nuevas preguntas cuando la generación falla o propone una repetida.
+
+Nota: se ha automatizado la revisión de sintaxis, recuento por tema y duplicados de enunciado normalizado. Como en cualquier banco de conocimiento amplio, conviene revisar preguntas y respuestas sugeridas por la IA o por datos categóricos antes de utilizarlo en torneos formales.
