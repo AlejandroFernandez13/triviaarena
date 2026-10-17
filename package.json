@@ -1,8 +1,8 @@
 {
   "name": "trivia-arena",
-  "version": "1.2.0",
+  "version": "1.8.0",
   "private": true,
-  "description": "Juego online de preguntas con rebote, perfiles y ligas privadas; banco de respaldo ampliado a 2990 preguntas.",
+  "description": "Trivia Arena: juego online con perfiles personalizables, fotos de usuario, seguridad de cuenta, partidas y ligas.",
   "type": "module",
   "engines": {
     "node": ">=20"

@@ -35,8 +35,10 @@ async function initDatabase() {
       username VARCHAR(24) NOT NULL,
       username_normalized VARCHAR(24) NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
+      avatar_data TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_data TEXT;
     CREATE TABLE IF NOT EXISTS leagues (
       id BIGSERIAL PRIMARY KEY,
       name VARCHAR(50) NOT NULL,
@@ -98,7 +100,7 @@ async function initDatabase() {
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '30kb' }));
+app.use(express.json({ limit: '300kb' }));
 app.use(express.urlencoded({ extended: false, limit: '10kb' }));
 
 const PgSession = connectPgSimple(session);
@@ -197,8 +199,77 @@ app.post('/api/logout', (req, res) => {
   });
 });
 
+const accountLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false });
+
+app.patch('/api/account/profile', requireAuth, accountLimiter, async (req, res) => {
+  const userId = currentUserId(req);
+  const username = typeof req.body.username === 'string' ? req.body.username.trim() : '';
+  if (!validUsername(username)) {
+    return res.status(400).json({ error: 'El usuario debe tener entre 3 y 20 caracteres y solo puede incluir letras, números, guion y guion bajo.' });
+  }
+
+  const hasAvatarField = Object.prototype.hasOwnProperty.call(req.body, 'avatarData');
+  let avatarData = null;
+  if (hasAvatarField && req.body.avatarData !== null && req.body.avatarData !== '') {
+    avatarData = req.body.avatarData;
+    const validAvatar = typeof avatarData === 'string'
+      && avatarData.length <= 180000
+      && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(avatarData);
+    if (!validAvatar) return res.status(400).json({ error: 'La imagen no es válida o pesa demasiado. Elige otra foto.' });
+  }
+
+  try {
+    const normalized = username.toLocaleLowerCase('es');
+    const { rows } = await pool.query(`
+      UPDATE users
+      SET username=$1, username_normalized=$2,
+          avatar_data=CASE WHEN $3::boolean THEN $4::text ELSE avatar_data END
+      WHERE id=$5
+      RETURNING id, username, avatar_data, created_at
+    `, [username, normalized, hasAvatarField, avatarData, userId]);
+    if (!rows.length) return res.status(404).json({ error: 'No se encontró el perfil.' });
+    req.session.username = rows[0].username;
+    req.session.save((error) => {
+      if (error) return res.status(500).json({ error: 'El perfil se guardó, pero no se pudo actualizar la sesión. Recarga la web.' });
+      return res.json({ user: { id: String(rows[0].id), username: rows[0].username, avatarData: rows[0].avatar_data || null, createdAt: rows[0].created_at } });
+    });
+  } catch (error) {
+    if (error.code === '23505') return res.status(409).json({ error: 'Ese nombre de usuario ya está ocupado.' });
+    console.error('Error actualizando perfil:', error);
+    return res.status(500).json({ error: 'No se pudo guardar el perfil. Inténtalo de nuevo.' });
+  }
+});
+
+app.post('/api/account/password', requireAuth, accountLimiter, async (req, res) => {
+  const userId = currentUserId(req);
+  const currentPassword = req.body.currentPassword;
+  const newPassword = req.body.newPassword;
+  if (typeof currentPassword !== 'string' || !currentPassword) {
+    return res.status(400).json({ error: 'Introduce tu contraseña actual.' });
+  }
+  if (!validPassword(newPassword)) {
+    return res.status(400).json({ error: 'La nueva contraseña debe tener entre 8 y 128 caracteres.' });
+  }
+  try {
+    const { rows } = await pool.query('SELECT password_hash FROM users WHERE id=$1', [userId]);
+    if (!rows.length) return res.status(404).json({ error: 'No se encontró el perfil.' });
+    if (!(await bcrypt.compare(currentPassword, rows[0].password_hash))) {
+      return res.status(400).json({ error: 'La contraseña actual no es correcta.' });
+    }
+    if (await bcrypt.compare(newPassword, rows[0].password_hash)) {
+      return res.status(400).json({ error: 'La nueva contraseña debe ser diferente de la actual.' });
+    }
+    const newHash = await bcrypt.hash(newPassword, 12);
+    await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2', [newHash, userId]);
+    return res.json({ ok: true, message: 'Contraseña actualizada correctamente.' });
+  } catch (error) {
+    console.error('Error cambiando contraseña:', error);
+    return res.status(500).json({ error: 'No se pudo cambiar la contraseña. Inténtalo de nuevo.' });
+  }
+});
+
 async function profilePayload(userId) {
-  const { rows: userRows } = await pool.query('SELECT id, username, created_at FROM users WHERE id=$1', [userId]);
+  const { rows: userRows } = await pool.query('SELECT id, username, avatar_data, created_at FROM users WHERE id=$1', [userId]);
   if (!userRows.length) return null;
   const { rows: statRows } = await pool.query(`
     SELECT COUNT(*) FILTER (WHERE m.status='finished')::int AS played,
@@ -215,7 +286,7 @@ async function profilePayload(userId) {
     WHERE mp.user_id=$1 AND m.status='finished'
     ORDER BY m.finished_at DESC NULLS LAST LIMIT 10
   `, [userId]);
-  return { user: { id: String(userRows[0].id), username: userRows[0].username, createdAt: userRows[0].created_at }, stats: statRows[0], history };
+  return { user: { id: String(userRows[0].id), username: userRows[0].username, avatarData: userRows[0].avatar_data || null, createdAt: userRows[0].created_at }, stats: statRows[0], history };
 }
 
 app.get('/api/me', requireAuth, async (req, res) => {

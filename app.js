@@ -16,6 +16,11 @@ let toastTimer = null;
 function esc(value = '') {
   return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 }
+function userAvatarMarkup(user, className = 'user-avatar') {
+  const username = String(user?.username || '?');
+  if (user?.avatarData) return `<img class="${className}" src="${esc(user.avatarData)}" alt="Foto de perfil de ${esc(username)}">`;
+  return `<span class="${className} avatar-fallback" aria-label="Avatar de ${esc(username)}">${esc(username.slice(0, 1).toUpperCase())}</span>`;
+}
 function number(value) { return Number(value || 0).toLocaleString('es-ES'); }
 function fmtDate(value) {
   if (!value) return 'Fecha no disponible';
@@ -59,7 +64,7 @@ async function api(url, options = {}) {
 }
 function authHeader() {
   topStatus.innerHTML = state.me
-    ? `<span class="status-dot"></span><span>${esc(state.me.username)}</span><button class="btn btn-ghost btn-small" data-action="logout">Salir</button>`
+    ? `${userAvatarMarkup(state.me, 'top-user-avatar')}<span>${esc(state.me.username)}</span>${state.view === 'dashboard' ? '<button class="btn btn-ghost btn-small" data-action="profile">Mi perfil</button>' : ''}<button class="btn btn-ghost btn-small" data-action="logout">Salir</button>`
     : `<span>Preguntas · Rebote · Competición</span>`;
 }
 function aiNotice(extra = '') {
@@ -116,7 +121,7 @@ function dashboardTemplate() {
   return `
     <div class="dashboard-hello">
       <div><div class="eyebrow">Panel de jugador</div><h1>Qué pasa, ${esc(state.me?.username || 'jugador')}<span style="color:var(--lime)">.</span></h1><p>Hoy puede cambiar tu clasificación. ¿Una partida rápida?</p></div>
-      <button class="btn btn-secondary" data-action="quick">＋ Crear partida</button>
+      <div class="dashboard-actions"><button class="btn btn-ghost" data-action="profile">Mi perfil ↗</button><button class="btn btn-secondary" data-action="quick">＋ Crear partida</button></div>
     </div>
     <div class="stat-grid">
       ${statCard('PARTIDAS JUGADAS', number(stats.played), 'Historial completo')}
@@ -137,6 +142,38 @@ function dashboardTemplate() {
     </div>
     <p class="footer-note">TRIVIA ARENA · El conocimiento compite · Las respuestas se valoran por su significado cuando la IA está activada.</p>`;
 }
+function accountTemplate() {
+  const user = state.me || {};
+  return `
+    <button class="back-link" data-action="dashboard-back">← Volver al menú principal</button>
+    <div class="section-head"><div><div class="eyebrow">Tu cuenta</div><h1>Mi perfil<span style="color:var(--lime)">.</span></h1><p>Personaliza cómo apareces en Trivia Arena y gestiona la seguridad de tu cuenta.</p></div></div>
+    <div class="account-layout">
+      <section class="panel account-panel">
+        <div class="account-summary">
+          <div class="account-avatar-wrap" id="profile-avatar-preview">${userAvatarMarkup(user, 'account-avatar')}</div>
+          <div><div class="eyebrow">Perfil de jugador</div><h2>${esc(user.username || 'Jugador')}</h2><p class="muted small">Miembro desde ${fmtDate(user.createdAt)}</p></div>
+        </div>
+        <form id="profile-form">
+          <div class="field-block"><label class="field-label" for="profile-username">Nombre de usuario</label><input class="field" id="profile-username" name="username" value="${esc(user.username || '')}" minlength="3" maxlength="20" autocomplete="username" required><p class="muted small" style="margin:7px 0 0">Entre 3 y 20 caracteres: letras, números, guion o guion bajo. Debe ser único.</p></div>
+          <div class="field-block"><label class="field-label" for="avatar-file">Foto de perfil</label><input class="field" style="padding:10px" id="avatar-file" name="avatarFile" type="file" accept="image/jpeg,image/png,image/webp"><p class="muted small" style="margin:7px 0 0">Puedes elegir una imagen JPG, PNG o WebP. Se recortará/ajustará automáticamente a un avatar pequeño.</p></div>
+          <div class="form-error" id="profile-error"></div>
+          <div class="account-actions"><button class="btn btn-primary" type="submit">Guardar perfil</button>${user.avatarData ? '<button class="btn btn-ghost" type="button" data-action="remove-avatar">Quitar foto</button>' : ''}</div>
+        </form>
+      </section>
+      <section class="panel account-panel">
+        <div class="eyebrow">Seguridad</div><h2>Cambiar contraseña</h2><p class="muted small">No es posible consultar tu contraseña actual. Por seguridad, se guarda como un hash no reversible; puedes reemplazarla verificando la actual.</p>
+        <form id="password-form">
+          <div class="field-block"><label class="field-label" for="current-password">Contraseña actual</label><input class="field" id="current-password" name="currentPassword" type="password" autocomplete="current-password" minlength="8" maxlength="128" required></div>
+          <div class="field-block"><label class="field-label" for="new-password">Nueva contraseña</label><input class="field" id="new-password" name="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required><p class="muted small" style="margin:7px 0 0">Utiliza al menos 8 caracteres.</p></div>
+          <div class="field-block"><label class="field-label" for="confirm-password">Repite la nueva contraseña</label><input class="field" id="confirm-password" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></div>
+          <div class="form-error" id="password-error"></div>
+          <button class="btn btn-secondary btn-block" type="submit">Actualizar contraseña</button>
+        </form>
+      </section>
+    </div>
+    <section class="panel account-logout-panel"><div><h3>¿Quieres entrar con otra cuenta?</h3><p class="muted small" style="margin-bottom:0">Cierra esta sesión para volver a la pantalla de inicio y acceder con otro usuario.</p></div><button class="btn btn-ghost" data-action="logout">Cerrar sesión</button></section>`;
+}
+
 function itemsCount(items) { return (items || []).length; }
 function topicOptions(selected = 'Cultura general') {
   const options = [
@@ -321,6 +358,7 @@ function render() {
   authHeader();
   if (state.view === 'auth') app.innerHTML = authTemplate();
   else if (state.view === 'dashboard') app.innerHTML = dashboardTemplate();
+  else if (state.view === 'account') app.innerHTML = accountTemplate();
   else if (state.view === 'quick') app.innerHTML = quickTemplate();
   else if (state.view === 'leagues') app.innerHTML = leagueTemplate();
   else if (state.view === 'league-detail') app.innerHTML = leagueDetailTemplate();
@@ -525,13 +563,24 @@ async function backHome() {
   render();
 }
 
-app.addEventListener('click', async (event) => {
+document.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-action]');
   if (!button || button.disabled) return;
   const action = button.dataset.action;
   if (action === 'auth-login') { state.authMode = 'login'; state.authError = ''; render(); }
   else if (action === 'auth-register') { state.authMode = 'register'; state.authError = ''; render(); }
   else if (action === 'home') await backHome();
+  else if (action === 'profile') { state.view = 'account'; render(); }
+  else if (action === 'dashboard-back') { state.view = 'dashboard'; render(); }
+  else if (action === 'remove-avatar') {
+    if (!window.confirm('¿Quitar tu foto de perfil?')) return;
+    try {
+      await api('/api/account/profile', { method: 'PATCH', body: JSON.stringify({ username: state.me.username, avatarData: null }) });
+      await refreshProfile();
+      render();
+      toast('Foto de perfil eliminada.');
+    } catch (error) { toast(error.message || 'No se pudo quitar la foto.'); }
+  }
   else if (action === 'quick') { state.room = null; state.view = 'quick'; render(); }
   else if (action === 'leagues') { try { await refreshMyLeagues(); } catch {} state.view = 'leagues'; render(); }
   else if (action === 'open-league') await loadLeague(button.dataset.code);
@@ -607,6 +656,25 @@ app.addEventListener('click', async (event) => {
 });
 
 app.addEventListener('change', (event) => {
+  if (event.target.id === 'avatar-file') {
+    const file = event.target.files?.[0];
+    const preview = document.getElementById('profile-avatar-preview');
+    if (file && preview) {
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+        event.target.value = '';
+        toast('Elige una imagen JPG, PNG o WebP.');
+      } else if (file.size > 8 * 1024 * 1024) {
+        event.target.value = '';
+        toast('La imagen original debe pesar menos de 8 MB.');
+      } else {
+        const img = document.createElement('img');
+        img.className = 'account-avatar';
+        img.alt = 'Vista previa de la foto de perfil';
+        img.src = URL.createObjectURL(file);
+        preview.replaceChildren(img);
+      }
+    }
+  }
   if (state.view === 'quick' && (event.target.name === 'topicChoice' || event.target.name === 'scoringMode')) updateQuickTopicVisibility();
   if (state.view === 'league-detail' && (event.target.name === 'topicChoice' || event.target.name === 'scoringMode')) updateLeagueDuelSettings();
 });
@@ -614,6 +682,28 @@ app.addEventListener('input', (event) => {
   if (event.target.id === 'answer-input') state.answerDraft = event.target.value;
   if (event.target.classList.contains('code-input')) event.target.value = event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
 });
+
+async function compressAvatarFile(file) {
+  if (!file) return null;
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Elige una imagen JPG, PNG o WebP.');
+  if (file.size > 8 * 1024 * 1024) throw new Error('La imagen original debe pesar menos de 8 MB.');
+  let bitmap;
+  try { bitmap = await createImageBitmap(file); }
+  catch { throw new Error('No se ha podido abrir la imagen. Prueba con otro archivo JPG, PNG o WebP.'); }
+  const scale = Math.min(1, 256 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const ctx = canvas.getContext('2d');
+  if (!ctx) { bitmap.close?.(); throw new Error('El navegador no ha podido procesar la imagen.'); }
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  for (const quality of [0.82, 0.72, 0.62, 0.52, 0.42]) {
+    const dataUrl = canvas.toDataURL('image/jpeg', quality);
+    if (dataUrl.length <= 180000) return dataUrl;
+  }
+  throw new Error('La imagen no se puede comprimir lo suficiente. Prueba con otra foto.');
+}
 
 app.addEventListener('submit', async (event) => {
   const form = event.target;
@@ -634,6 +724,45 @@ app.addEventListener('submit', async (event) => {
       const box = document.getElementById('auth-error');
       if (box) { box.textContent = error.message; box.classList.add('visible'); }
     }
+  }
+  else if (form.id === 'profile-form') {
+    hideFormError('profile-error');
+    const values = new FormData(form);
+    const username = String(values.get('username') || '').trim();
+    if (!/^[\p{L}\p{N}_-]{3,20}$/u.test(username)) {
+      showFormError('profile-error', 'El usuario debe tener entre 3 y 20 caracteres y solo puede incluir letras, números, guion o guion bajo.');
+      return;
+    }
+    const file = document.getElementById('avatar-file')?.files?.[0];
+    try {
+      const body = { username };
+      if (file) body.avatarData = await compressAvatarFile(file);
+      await api('/api/account/profile', { method: 'PATCH', body: JSON.stringify(body) });
+      await refreshProfile();
+      await refreshMyLeagues();
+      render();
+      toast('Perfil actualizado correctamente.');
+    } catch (error) { showFormError('profile-error', error.message || 'No se pudo guardar el perfil.'); }
+  }
+  else if (form.id === 'password-form') {
+    hideFormError('password-error');
+    const values = new FormData(form);
+    const currentPassword = String(values.get('currentPassword') || '');
+    const newPassword = String(values.get('newPassword') || '');
+    const confirmPassword = String(values.get('confirmPassword') || '');
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      showFormError('password-error', 'La nueva contraseña debe tener entre 8 y 128 caracteres.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showFormError('password-error', 'Las nuevas contraseñas no coinciden.');
+      return;
+    }
+    try {
+      const data = await api('/api/account/password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) });
+      form.reset();
+      toast(data.message || 'Contraseña actualizada.');
+    } catch (error) { showFormError('password-error', error.message || 'No se pudo cambiar la contraseña.'); }
   }
   else if (form.id === 'quick-form') {
     const values = new FormData(form);
