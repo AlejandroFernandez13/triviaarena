@@ -6,8 +6,10 @@ const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 const model = process.env.OPENAI_MODEL || 'gpt-5.5';
-const RANDOM_TOPIC_LABELS = new Set(['aleatorio', 'cualquier tema', 'random', 'any topic']);
+const RANDOM_TOPIC_LABELS = new Set(['aleatorio', 'random']);
+const ANY_TOPIC_LABELS = new Set(['cualquier tema', 'any topic']);
 const META_TOPICS = new Set(['aleatorio', 'cualquier tema', 'tema personalizado']);
+const PLAYABLE_TOPICS = TOPICS.filter((item) => !META_TOPICS.has(item.toLocaleLowerCase('es')));
 
 export const isAiEnabled = Boolean(openai);
 
@@ -15,12 +17,21 @@ function pickRandom(items) {
   return items[Math.floor(Math.random() * items.length)];
 }
 
+export function isRandomTopic(topic) {
+  return RANDOM_TOPIC_LABELS.has(String(topic || '').trim().toLocaleLowerCase('es'));
+}
+
+function isAnyTopic(topic) {
+  return ANY_TOPIC_LABELS.has(String(topic || '').trim().toLocaleLowerCase('es'));
+}
+
+export function chooseRandomTopic() {
+  return pickRandom(PLAYABLE_TOPICS);
+}
+
 function resolveTopic(topic) {
   const requested = String(topic || 'Cultura general').trim() || 'Cultura general';
-  if (RANDOM_TOPIC_LABELS.has(requested.toLocaleLowerCase('es'))) {
-    const available = TOPICS.filter((item) => !META_TOPICS.has(item.toLocaleLowerCase('es')));
-    return pickRandom(available);
-  }
+  if (isRandomTopic(requested)) return chooseRandomTopic();
   return requested;
 }
 
@@ -111,9 +122,22 @@ function questionWasAsked(questionText, recentQuestionTexts = []) {
   });
 }
 
-function bankQuestion(topic, recentQuestionTexts = []) {
-  const effectiveTopic = resolveTopic(topic);
+function chooseAnyTopic(recentQuestionTexts = []) {
+  // En Cualquier tema se busca entre todas las categorías, evitando repetir categoría consecutiva
+  // cuando haya alternativas con preguntas aún no usadas en esta partida.
   const recent = new Set(recentQuestionTexts.map((entry) => normalizeAnswer(historyQuestion(entry))));
+  const freshTopicsSet = new Set();
+  for (const question of QUESTION_BANK) {
+    if (!recent.has(normalizeAnswer(question.question))) freshTopicsSet.add(question.topic);
+  }
+  const freshTopics = PLAYABLE_TOPICS.filter((topic) => freshTopicsSet.has(topic));
+  const previousTopic = [...recentQuestionTexts].reverse().find((entry) => typeof entry === 'object' && entry?.topic)?.topic;
+  const alternatives = freshTopics.filter((topic) => topic !== previousTopic);
+  return pickRandom(alternatives.length ? alternatives : freshTopics.length ? freshTopics : PLAYABLE_TOPICS);
+}
+
+function bankQuestion(topic, recentQuestionTexts = []) {
+  const effectiveTopic = isAnyTopic(topic) ? chooseAnyTopic(recentQuestionTexts) : resolveTopic(topic);
   let candidates = QUESTION_BANK.filter((q) => q.topic.toLocaleLowerCase('es') === effectiveTopic.toLocaleLowerCase('es'));
 
   // Para temas personalizados sin IA, busca palabras relevantes en tema, pregunta y solución.
@@ -124,7 +148,8 @@ function bankQuestion(topic, recentQuestionTexts = []) {
   }
   if (!candidates.length) candidates = QUESTION_BANK.filter((q) => q.topic === 'Cultura general');
 
-  // No repetir ninguna pregunta del banco hasta agotar las disponibles para ese tema.
+  // Descarta preguntas ya utilizadas (incluidas las entradas duplicadas) durante esta partida.
+  const recent = new Set(recentQuestionTexts.map((entry) => normalizeAnswer(historyQuestion(entry))));
   const fresh = candidates.filter((q) => !recent.has(normalizeAnswer(q.question)));
   const selected = pickRandom(fresh.length ? fresh : candidates);
   return { ...selected, source: 'bank' };
@@ -177,13 +202,15 @@ async function askAIForQuestion(topic, history, rejectedQuestions) {
     answer: parsed.answer.trim(),
     acceptedAnswers: parsed.acceptedAnswers.filter((x) => typeof x === 'string').slice(0, 12),
     explanation: typeof parsed.explanation === 'string' ? parsed.explanation.trim() : '',
-    topic: typeof parsed.topic === 'string' && parsed.topic.trim() ? parsed.topic.trim() : topic,
+    // La categoría la decide el servidor: así el tema mostrado coincide con la selección del juego.
+    topic,
     source: 'ai',
   };
 }
 
 export async function generateQuestion(topic, recentQuestionTexts = []) {
-  const effectiveTopic = resolveTopic(topic);
+  const requestedTopic = String(topic || 'Cultura general').trim() || 'Cultura general';
+  const effectiveTopic = isAnyTopic(requestedTopic) ? chooseAnyTopic(recentQuestionTexts) : resolveTopic(requestedTopic);
   if (openai) {
     const rejectedQuestions = [];
     for (let attempt = 0; attempt < 3; attempt += 1) {

@@ -10,7 +10,7 @@ import connectPgSimple from 'connect-pg-simple';
 import rateLimit from 'express-rate-limit';
 import { Pool } from 'pg';
 import { Server as SocketServer } from 'socket.io';
-import { generateQuestion, gradeAnswer, isAiEnabled } from './quiz.js';
+import { generateQuestion, gradeAnswer, isAiEnabled, isRandomTopic, chooseRandomTopic } from './quiz.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = __dirname;
@@ -740,6 +740,9 @@ async function createRoomForUser(socket, payload) {
   }
   // Las reglas son propias de cada partida, también dentro de una liga.
   settings = validateMatchSettings(payload);
+  // Aleatorio elige una sola de las 17 categorías al crear la sala; se mantiene durante toda la partida.
+  // Al guardar el nombre concreto en settings, se muestra tanto en la sala de espera como en la partida.
+  if (isRandomTopic(settings.topic)) settings.topic = chooseRandomTopic();
   const { rows: userRows } = await pool.query('SELECT id, username, avatar_data FROM users WHERE id=$1', [userId]);
   if (!userRows.length) throw new Error('Tu perfil no existe. Cierra sesión y vuelve a entrar.');
   const matchId = crypto.randomUUID();
