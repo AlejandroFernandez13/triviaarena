@@ -15,14 +15,15 @@ import { generateQuestion, gradeAnswer, isAiEnabled, isRandomTopic, chooseRandom
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = __dirname;
 const PORT = Number(process.env.PORT || 3000);
+// Prioriza Supabase durante la migración. DATABASE_URL se mantiene como respaldo
+// para poder volver a la base antigua sin cambiar el código.
 const databaseUrl = process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL;
 if (!databaseUrl) {
-  console.error('Falta SUPABASE_DATABASE_URL o DATABASE_URL. Configura PostgreSQL en las variables de entorno.');
+  console.error('Falta SUPABASE_DATABASE_URL o DATABASE_URL. Configura PostgreSQL en el entorno.');
   process.exit(1);
 }
 
 const pool = new Pool({
-  // Prioriza Supabase cuando está configurado; conserva DATABASE_URL como respaldo.
   connectionString: databaseUrl,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
   max: 10,
